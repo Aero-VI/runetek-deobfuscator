@@ -33,6 +33,11 @@ public class HookInjector implements TransformPhase {
         int ipHooks = IPHookInjector.inject(context.classes());
         System.out.println("    IP hooks injected: " + ipHooks);
 
+        // Phase 2a.5: JS5 Bypass — skip update server connection
+        System.out.println("  [Phase 2a.5] JS5 Bypass — patching update server check...");
+        int js5Patches = JS5Bypass.apply(context);
+        System.out.println("    JS5 bypass patches: " + js5Patches);
+
         // Phase 2b: RSA Lobotomy — neutralize RSA encryption
         System.out.println("  [Phase 2b] RSA Lobotomy — scanning for modPow calls...");
         int rsaPatches = RSALobotomizer.inject(context.classes());
@@ -100,7 +105,7 @@ public class HookInjector implements TransformPhase {
         context.addClass(EventBus.INTERNAL_NAME, eventBusClass);
         System.out.println("  EventBus class injected: " + EventBus.INTERNAL_NAME);
 
-        context.addHooksInjected(totalInjected + ipHooks + rsaPatches);
+        context.addHooksInjected(totalInjected + ipHooks + rsaPatches + js5Patches);
         System.out.println("  Total hooks/patches: " + (totalInjected + ipHooks + rsaPatches));
     }
 }
