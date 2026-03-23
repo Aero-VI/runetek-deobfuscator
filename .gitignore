@@ -1,29 +1,13 @@
-# Maven
 target/
-dependency-reduced-pom.xml
-pom.xml.tag
-pom.xml.releaseBackup
-pom.xml.versionsBackup
-pom.xml.next
-release.properties
-
-# IDE
-.idea/
-*.iml
-.project
-.classpath
-.settings/
-.vscode/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Build
+test-output/
+test-output-hd/
+test-jars/
 *.class
 *.jar
-!src/**/*.jar
-*.log
+!.mvn/wrapper/*.jar
+.idea/
+*.iml
+.settings/
+.project
+.classpath
+dependency-reduced-pom.xml
