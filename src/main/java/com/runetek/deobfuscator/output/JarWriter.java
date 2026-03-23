@@ -30,7 +30,6 @@ public class JarWriter {
         Manifest manifest = new Manifest();
         manifest.getMainAttributes().put(Attributes.Name.MANIFEST_VERSION, "1.0");
         if (mainClass != null) {
-            // Convert internal name to binary name
             manifest.getMainAttributes().put(Attributes.Name.MAIN_CLASS, mainClass.replace('/', '.'));
         }
 
@@ -56,6 +55,53 @@ public class JarWriter {
         }
 
         System.out.println("  Written " + written + " classes to " + outputPath.getFileName() +
+                (errors > 0 ? " (" + errors + " errors)" : ""));
+    }
+
+    /**
+     * Write a runnable JAR with embedded Launcher that wraps the Applet in a JFrame.
+     * The JAR can be launched with: java -jar output.jar
+     */
+    public static void writeRunnableJar(TransformContext context, Path outputPath, String appletClassName) throws IOException {
+        Manifest manifest = new Manifest();
+        manifest.getMainAttributes().put(Attributes.Name.MANIFEST_VERSION, "1.0");
+        manifest.getMainAttributes().put(Attributes.Name.MAIN_CLASS, "Launcher");
+
+        int written = 0;
+        int errors = 0;
+
+        try (JarOutputStream jos = new JarOutputStream(new FileOutputStream(outputPath.toFile()), manifest)) {
+            // Write all deobfuscated classes
+            for (Map.Entry<String, ClassNode> entry : context.classes().entrySet()) {
+                String name = entry.getKey();
+                ClassNode cn = entry.getValue();
+
+                try {
+                    byte[] bytes = AsmUtil.toBytesNoFrames(cn);
+                    jos.putNextEntry(new JarEntry(name + ".class"));
+                    jos.write(bytes);
+                    jos.closeEntry();
+                    written++;
+                } catch (Exception e) {
+                    System.err.println("  Warning: failed to write " + name + " to JAR: " + e.getMessage());
+                    errors++;
+                }
+            }
+
+            // Write Launcher.class
+            byte[] launcherBytes = LauncherGenerator.generate(appletClassName);
+            jos.putNextEntry(new JarEntry("Launcher.class"));
+            jos.write(launcherBytes);
+            jos.closeEntry();
+
+            // Write LauncherStub.class
+            byte[] stubBytes = LauncherGenerator.generateStub();
+            jos.putNextEntry(new JarEntry("LauncherStub.class"));
+            jos.write(stubBytes);
+            jos.closeEntry();
+        }
+
+        System.out.println("  Written " + written + " classes + Launcher to " + outputPath.getFileName() +
                 (errors > 0 ? " (" + errors + " errors)" : ""));
     }
 }

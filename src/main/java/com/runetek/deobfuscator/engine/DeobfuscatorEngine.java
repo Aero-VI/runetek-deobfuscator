@@ -13,7 +13,9 @@ import com.runetek.deobfuscator.phase2.HookRegistry;
 import com.runetek.deobfuscator.phase3.DecompilationPhase;
 import com.runetek.deobfuscator.util.JarLoader;
 
+import org.objectweb.asm.tree.ClassNode;
 import java.nio.file.Files;
+import java.util.Map;
 
 /**
  * Main engine orchestrator. Loads input, configures the pipeline,
@@ -98,9 +100,12 @@ public class DeobfuscatorEngine {
         System.out.println("\nWriting output...");
         Files.createDirectories(config.outputDir());
 
-        // Write output JAR if requested
+        // Find the applet main class for launcher generation
+        String appletClass = findAppletClass(context);
+
+        // Write output JAR if requested (runnable with embedded Launcher)
         if (config.outputJar() != null) {
-            JarWriter.writeJar(context, config.outputJar(), null);
+            JarWriter.writeRunnableJar(context, config.outputJar(), appletClass);
         }
 
         // Export mappings
@@ -122,5 +127,35 @@ public class DeobfuscatorEngine {
         // Print stats
         System.out.println("\n--- Statistics ---");
         context.printStats();
+    }
+
+    /**
+     * Find the most-derived concrete class extending java.applet.Applet.
+     */
+    private String findAppletClass(TransformContext context) {
+        String bestCandidate = null;
+        int bestDepth = -1;
+
+        for (Map.Entry<String, ClassNode> entry : context.classes().entrySet()) {
+            ClassNode cn = entry.getValue();
+            int depth = 0;
+            String superName = cn.superName;
+            boolean isApplet = false;
+            while (superName != null && depth < 20) {
+                if (superName.contains("Applet")) {
+                    isApplet = true;
+                    break;
+                }
+                ClassNode superNode = context.getClass(superName);
+                if (superNode == null) break;
+                superName = superNode.superName;
+                depth++;
+            }
+            if (isApplet && depth > bestDepth) {
+                bestDepth = depth;
+                bestCandidate = cn.name;
+            }
+        }
+        return bestCandidate != null ? bestCandidate : "client";
     }
 }
