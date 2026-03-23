@@ -152,10 +152,36 @@ public class FieldPatternMatcher {
         return null;
     }
 
+    // JDK/JRE method and field names that happen to be short but must NOT be renamed
+    private static final java.util.Set<String> RESERVED_NAMES = new java.util.HashSet<String>(
+            java.util.Arrays.asList(
+                // Thread/Runnable
+                "run", "get", "set", "put", "add", "map",
+                // Object
+                "equals", "hashCode", "toString", "clone", "finalize", "notify", "notifyAll", "wait",
+                // Applet / AWT / Swing
+                "init", "start", "stop", "destroy", "paint", "update", "repaint",
+                // Collections
+                "size", "clear", "remove", "contains", "isEmpty", "iterator", "next", "hasNext",
+                // IO
+                "read", "write", "close", "flush", "reset", "skip", "mark", "available",
+                // Comparable/Comparator
+                "compareTo", "compare",
+                // Iterable
+                "forEach",
+                // Map
+                "key", "keys", "values", "entrySet", "keySet",
+                // Other common short JDK names
+                "abs", "min", "max", "sum", "and", "or", "xor", "not", "log", "sin", "cos", "tan",
+                "gc", "exit", "exec", "load", "open", "seek", "tell", "eof", "end"
+            ));
+
     /**
      * Check if a name looks obfuscated (single char or very short nonsensical).
+     * Excludes known JDK method/field names to prevent AbstractMethodErrors.
      */
     public static boolean isObfuscatedName(String name) {
+        if (RESERVED_NAMES.contains(name)) return false;
         if (name.length() <= 2) return true;
         return name.matches("^[a-z]{1,3}$");
     }
