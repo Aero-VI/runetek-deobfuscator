@@ -87,8 +87,25 @@ public class JS5Bypass {
 
         if (!setsState) return 0;
 
-        // Inject RETURN at the beginning of the method to skip all JS5 logic
-        mn.instructions.insert(new InsnNode(Opcodes.RETURN));
+        // Replace method body with just RETURN
+        mn.instructions.clear();
+        mn.tryCatchBlocks.clear();
+        mn.localVariables = null;
+        mn.instructions.add(new InsnNode(Opcodes.RETURN));
+        mn.maxStack = 0;
+        mn.maxLocals = (mn.access & Opcodes.ACC_STATIC) != 0 ? 0 : 1;
+        // Count params to set correct maxLocals
+        String desc = mn.desc;
+        int params = (mn.access & Opcodes.ACC_STATIC) != 0 ? 0 : 1;
+        int i = 1; // skip '('
+        while (desc.charAt(i) != ')') {
+            char c = desc.charAt(i);
+            if (c == 'J' || c == 'D') { params += 2; i++; }
+            else if (c == 'L') { params++; i = desc.indexOf(';', i) + 1; }
+            else if (c == '[') { i++; continue; }
+            else { params++; i++; }
+        }
+        mn.maxLocals = params;
         System.out.println("    [JS5 Bypass] Disabled JS5 method: " + className + "." + mn.name + mn.desc);
         return 1;
     }
