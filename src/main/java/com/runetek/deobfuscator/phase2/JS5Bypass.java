@@ -2,7 +2,13 @@ package com.runetek.deobfuscator.phase2;
 
 import com.runetek.deobfuscator.engine.TransformContext;
 import org.objectweb.asm.Opcodes;
-import org.objectweb.asm.tree.*;
+import org.objectweb.asm.tree.AbstractInsnNode;
+import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.FieldInsnNode;
+import org.objectweb.asm.tree.InsnNode;
+import org.objectweb.asm.tree.IntInsnNode;
+import org.objectweb.asm.tree.LdcInsnNode;
+import org.objectweb.asm.tree.MethodNode;
 
 import java.util.Map;
 
@@ -31,11 +37,60 @@ public class JS5Bypass {
             ClassNode cn = entry.getValue();
             for (MethodNode mn : cn.methods) {
                 if (mn.instructions == null) continue;
-                patches += patchMethod(mn, cn.name);
+                patches += patchJS5Method(mn, cn.name);
             }
         }
 
         return patches;
+    }
+
+    /**
+     * Find the method that handles JS5 connection (contains "js5io"/"js5connect" strings)
+     * and inject a RETURN at the top to skip it entirely.
+     */
+    private static int patchJS5Method(MethodNode mn, String className) {
+        // Check if this method contains JS5-related strings
+        boolean hasJS5 = false;
+        for (AbstractInsnNode insn = mn.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+            if (insn instanceof LdcInsnNode) {
+                LdcInsnNode ldc = (LdcInsnNode) insn;
+                if (ldc.cst instanceof String) {
+                    String s = (String) ldc.cst;
+                    if ("js5io".equals(s) || "js5connect".equals(s) || "js5crc".equals(s)) {
+                        hasJS5 = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (!hasJS5) return 0;
+
+        // Also check this method contains "Connecting to update" or sets Definition1.intField0
+        // to confirm it's the right one (not just a random reference)
+        boolean setsState = false;
+        for (AbstractInsnNode insn = mn.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+            if (insn.getOpcode() == Opcodes.PUTSTATIC && insn instanceof FieldInsnNode) {
+                FieldInsnNode fi = (FieldInsnNode) insn;
+                if ("I".equals(fi.desc)) {
+                    AbstractInsnNode prev = prevReal(insn);
+                    if (prev != null) {
+                        int val = getIntValue(prev);
+                        if (val == 1000) { // Error state
+                            setsState = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (!setsState) return 0;
+
+        // Inject RETURN at the beginning of the method to skip all JS5 logic
+        mn.instructions.insert(new InsnNode(Opcodes.RETURN));
+        System.out.println("    [JS5 Bypass] Disabled JS5 method: " + className + "." + mn.name + mn.desc);
+        return 1;
     }
 
     private static int patchMethod(MethodNode mn, String className) {
