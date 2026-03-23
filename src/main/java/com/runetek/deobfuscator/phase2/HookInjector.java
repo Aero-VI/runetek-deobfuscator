@@ -12,15 +12,10 @@ import java.util.Map;
 /**
  * Phase 2: ASM Bytecode Injection Hooks.
  *
- * Injects event dispatch calls into target methods and field accesses
- * based on HookDefinitions from the HookRegistry. Also injects the
- * EventBus utility class into the output.
- *
- * Supports four hook types:
- *   - METHOD_ENTRY: fires at method start
- *   - METHOD_EXIT: fires before each return instruction
- *   - FIELD_GET: fires after each GETFIELD/GETSTATIC of the target field
- *   - FIELD_SET: fires before each PUTFIELD/PUTSTATIC of the target field
+ * Performs three types of injection:
+ *   1. IP Hook — redirects socket connections to 127.0.0.1
+ *   2. RSA Lobotomy — removes BigInteger.modPow() RSA encryption
+ *   3. EventBus hooks — user-defined method/field event dispatching
  */
 public class HookInjector implements TransformPhase {
 
@@ -33,15 +28,25 @@ public class HookInjector implements TransformPhase {
     public void execute(TransformContext context) {
         HookRegistry registry = context.services().resolve(HookRegistry.class);
 
+        // Phase 2a: IP Hook — redirect socket connections to localhost
+        System.out.println("  [Phase 2a] IP Hook — scanning for socket connections...");
+        int ipHooks = IPHookInjector.inject(context.classes());
+        System.out.println("    IP hooks injected: " + ipHooks);
+
+        // Phase 2b: RSA Lobotomy — neutralize RSA encryption
+        System.out.println("  [Phase 2b] RSA Lobotomy — scanning for modPow calls...");
+        int rsaPatches = RSALobotomizer.inject(context.classes());
+        System.out.println("    RSA patches applied: " + rsaPatches);
+
+        // Phase 2c: EventBus user-defined hooks
         if (registry.size() == 0) {
-            System.out.println("  No hooks defined, injecting EventBus class only");
+            System.out.println("  [Phase 2c] No user-defined hooks, injecting EventBus class only");
         } else {
-            System.out.println("  Processing " + registry.size() + " hook definitions...");
+            System.out.println("  [Phase 2c] Processing " + registry.size() + " user-defined hook definitions...");
         }
 
         int totalInjected = 0;
 
-        // Process each class for applicable hooks
         for (Map.Entry<String, ClassNode> entry : context.classes().entrySet()) {
             String className = entry.getKey();
             ClassNode cn = entry.getValue();
@@ -51,7 +56,6 @@ public class HookInjector implements TransformPhase {
 
             System.out.println("    Hooks for class: " + className);
 
-            // Process method hooks
             for (MethodNode mn : cn.methods) {
                 if (mn.name.equals("<init>") || mn.name.equals("<clinit>")) continue;
 
@@ -59,20 +63,17 @@ public class HookInjector implements TransformPhase {
                         className, mn.name, mn.desc);
 
                 if (!methodHooks.isEmpty()) {
-                    // Inject entry hooks
                     int entryCount = MethodHookVisitor.injectEntryHooks(mn, methodHooks);
-                    // Inject exit hooks
                     int exitCount = MethodHookVisitor.injectExitHooks(mn, methodHooks);
 
                     int methodTotal = entryCount + exitCount;
                     if (methodTotal > 0) {
                         System.out.println("      " + mn.name + mn.desc +
-                                " → " + methodTotal + " method hooks injected");
+                                " -> " + methodTotal + " method hooks injected");
                         totalInjected += methodTotal;
                     }
                 }
 
-                // Process field hooks — scan all methods for field access instructions
                 for (FieldNode fn : cn.fields) {
                     List<HookDefinition> fieldHooks = registry.hooksForField(className, fn.name);
                     if (fieldHooks.isEmpty()) continue;
@@ -84,7 +85,7 @@ public class HookInjector implements TransformPhase {
 
                     int fieldTotal = getCount + setCount;
                     if (fieldTotal > 0) {
-                        System.out.println("      " + mn.name + " → " + fieldTotal +
+                        System.out.println("      " + mn.name + " -> " + fieldTotal +
                                 " field hooks for " + fn.name);
                         totalInjected += fieldTotal;
                     }
@@ -92,15 +93,14 @@ public class HookInjector implements TransformPhase {
             }
         }
 
-        // Always inject the EventBus and EventListener classes
+        // Inject EventBus and EventListener classes
         ClassNode listenerInterface = EventBus.generateListenerInterface();
         context.addClass(EventBus.LISTENER_INTERNAL_NAME, listenerInterface);
         ClassNode eventBusClass = EventBus.generateEventBusClass();
         context.addClass(EventBus.INTERNAL_NAME, eventBusClass);
         System.out.println("  EventBus class injected: " + EventBus.INTERNAL_NAME);
-        System.out.println("  EventListener interface injected: " + EventBus.LISTENER_INTERNAL_NAME);
 
-        context.addHooksInjected(totalInjected);
-        System.out.println("  Total hooks injected: " + totalInjected);
+        context.addHooksInjected(totalInjected + ipHooks + rsaPatches);
+        System.out.println("  Total hooks/patches: " + (totalInjected + ipHooks + rsaPatches));
     }
 }
