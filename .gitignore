@@ -1,0 +1,51 @@
+# Build artifacts
+target/
+build/
+out/
+bin/
+*.jar
+*.war
+*.ear
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.classpath
+.project
+.settings/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Dependencies
+lib/
+libs/
+dependency-jars/
+
+# Temporary
+tmp/
+temp/
+
+# Test outputs
+test-output/
+
+# Compiled class files
+*.class
+
+# Package files
+*.pak
+*.bak
+
+# Fernflower/CFR outputs
+decompiled/
+output/
+
+# Client samples (do not commit obfuscated jars)
+samples/
+*.client.jar
