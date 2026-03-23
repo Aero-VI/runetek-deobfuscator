@@ -5,6 +5,7 @@ import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.FieldInsnNode;
+import org.objectweb.asm.tree.InsnList;
 import org.objectweb.asm.tree.InsnNode;
 import org.objectweb.asm.tree.IntInsnNode;
 import org.objectweb.asm.tree.LdcInsnNode;
@@ -33,6 +34,11 @@ public class JS5Bypass {
     public static int apply(TransformContext context) {
         int patches = 0;
 
+        // Strategy 1: Find and set Definition1.intField0 (gameState) to 25 at init
+        // This skips states 0, 5, 10 which all do JS5 work
+        patches += patchGameStateInit(context);
+
+        // Strategy 2: Empty out JS5 handler methods as a safety net
         for (Map.Entry<String, ClassNode> entry : context.classes().entrySet()) {
             ClassNode cn = entry.getValue();
             for (MethodNode mn : cn.methods) {
@@ -42,6 +48,85 @@ public class JS5Bypass {
         }
 
         return patches;
+    }
+
+    /**
+     * Find the game state field (Definition1.intField0-style) and inject code
+     * in the client's init() method to set it to 25 (past JS5).
+     */
+    private static int patchGameStateInit(TransformContext context) {
+        // Find the field: look for a static int field that gets compared to 0, 5, 10, 25, 30
+        // in the same method with js5 strings nearby
+        for (Map.Entry<String, ClassNode> entry : context.classes().entrySet()) {
+            ClassNode cn = entry.getValue();
+            for (MethodNode mn : cn.methods) {
+                if (mn.instructions == null) continue;
+
+                // Find method containing "js5io" string
+                boolean hasJS5 = false;
+                for (AbstractInsnNode insn = mn.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+                    if (insn instanceof LdcInsnNode && "js5io".equals(((LdcInsnNode) insn).cst)) {
+                        hasJS5 = true;
+                        break;
+                    }
+                }
+                if (!hasJS5) continue;
+
+                // Find the game state field: look for GETSTATIC + comparison to 0 or 5
+                for (AbstractInsnNode insn = mn.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+                    if (insn.getOpcode() != Opcodes.GETSTATIC) continue;
+                    FieldInsnNode fi = (FieldInsnNode) insn;
+                    if (!"I".equals(fi.desc)) continue;
+
+                    AbstractInsnNode next = nextReal(insn);
+                    if (next == null) continue;
+
+                    // Check if compared to 0 (IFEQ) or 5 (BIPUSH 5 + IF_ICMP)
+                    if (next.getOpcode() == Opcodes.IFEQ || next.getOpcode() == Opcodes.IFNE) {
+                        // This field is compared to 0 — likely the game state
+                        String gsOwner = fi.owner;
+                        String gsName = fi.name;
+
+                        // Now find the init() method in the client class and inject
+                        // gameState = 25 at the end of init
+                        return injectStateSkip(context, gsOwner, gsName, cn.name);
+                    }
+                }
+            }
+        }
+        return 0;
+    }
+
+    /**
+     * Inject "gameStateField = 25" at the end of the client's init() method.
+     */
+    private static int injectStateSkip(TransformContext context, String fieldOwner, String fieldName, String clientClass) {
+        ClassNode clientNode = context.getClass(clientClass);
+        if (clientNode == null) return 0;
+
+        for (MethodNode mn : clientNode.methods) {
+            if (!"init".equals(mn.name)) continue;
+
+            // Insert BIPUSH 25 + PUTSTATIC before every RETURN in init()
+            java.util.List<AbstractInsnNode> returns = new java.util.ArrayList<AbstractInsnNode>();
+            for (AbstractInsnNode insn = mn.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+                if (insn.getOpcode() == Opcodes.RETURN) {
+                    returns.add(insn);
+                }
+            }
+
+            for (AbstractInsnNode ret : returns) {
+                InsnList inject = new InsnList();
+                inject.add(new IntInsnNode(Opcodes.BIPUSH, 25));
+                inject.add(new FieldInsnNode(Opcodes.PUTSTATIC, fieldOwner, fieldName, "I"));
+                mn.instructions.insertBefore(ret, inject);
+            }
+
+            System.out.println("    [JS5 Bypass] Injected gameState=25 at " + returns.size()
+                    + " return points in " + clientClass + ".init() (field " + fieldOwner + "." + fieldName + ")");
+            return 1;
+        }
+        return 0;
     }
 
     /**
