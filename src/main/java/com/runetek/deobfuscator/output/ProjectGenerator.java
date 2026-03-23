@@ -2,17 +2,23 @@ package com.runetek.deobfuscator.output;
 
 import com.runetek.deobfuscator.engine.TransformContext;
 import com.runetek.deobfuscator.util.AsmUtil;
+import com.strobel.decompiler.Decompiler;
+import com.strobel.decompiler.DecompilerSettings;
+import com.strobel.decompiler.PlainTextOutput;
+import com.strobel.assembler.metadata.ITypeLoader;
+import com.strobel.assembler.metadata.Buffer;
 import org.objectweb.asm.tree.ClassNode;
 
-import java.io.IOException;
+import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.Map;
 
 /**
  * Generates a re-compilable Maven project from deobfuscated classes.
- * Writes transformed .class files and generates a pom.xml so the
- * output can be built standalone.
+ * Uses Procyon decompiler to produce .java sources from transformed bytecode,
+ * then writes a complete Maven project structure.
  */
 public class ProjectGenerator {
 
@@ -21,34 +27,91 @@ public class ProjectGenerator {
      */
     public static void generate(TransformContext context, Path outputDir) throws IOException {
         Path projectDir = outputDir.resolve("deobfuscated-project");
-        Path classesDir = projectDir.resolve("src/main/java");
-        Files.createDirectories(classesDir);
+        Path sourcesDir = projectDir.resolve("src/main/java");
+        Files.createDirectories(sourcesDir);
 
         // Write pom.xml
         writePom(projectDir);
 
-        // Write classes as .class files in a 'classes' directory
-        // (Decompilation to .java would require Procyon/CFR integration)
-        Path compiledDir = projectDir.resolve("target/classes");
-        Files.createDirectories(compiledDir);
-
+        // Prepare class bytes for the type loader
+        Map<String, byte[]> classBytesMap = new HashMap<>();
         for (Map.Entry<String, ClassNode> entry : context.classes().entrySet()) {
-            String name = entry.getKey();
-            ClassNode cn = entry.getValue();
-
-            Path classFile = compiledDir.resolve(name + ".class");
-            Files.createDirectories(classFile.getParent());
-
             try {
-                byte[] bytes = AsmUtil.toBytesNoFrames(cn);
-                Files.write(classFile, bytes);
+                byte[] bytes = AsmUtil.toBytesNoFrames(entry.getValue());
+                classBytesMap.put(entry.getKey(), bytes);
             } catch (Exception e) {
-                System.err.println("  Warning: failed to write " + name + " to project: " + e.getMessage());
+                System.err.println("  Warning: failed to serialize " + entry.getKey() + ": " + e.getMessage());
             }
         }
 
+        // Also write .class files for reference
+        Path classesDir = projectDir.resolve("target/classes");
+        Files.createDirectories(classesDir);
+        for (Map.Entry<String, byte[]> entry : classBytesMap.entrySet()) {
+            Path classFile = classesDir.resolve(entry.getKey() + ".class");
+            Files.createDirectories(classFile.getParent());
+            Files.write(classFile, entry.getValue());
+        }
+
+        // Decompile each class to .java using Procyon
+        int decompiled = 0;
+        int errors = 0;
+
+        DecompilerSettings settings = DecompilerSettings.javaDefaults();
+        settings.setTypeLoader(new InMemoryTypeLoader(classBytesMap));
+        settings.setForceExplicitImports(true);
+
+        for (Map.Entry<String, byte[]> entry : classBytesMap.entrySet()) {
+            String className = entry.getKey();
+            try {
+                // Decompile to string
+                StringWriter sw = new StringWriter();
+                PlainTextOutput output = new PlainTextOutput(sw);
+                Decompiler.decompile(className, output, settings);
+                String source = sw.toString();
+
+                if (source != null && !source.isBlank()) {
+                    // Write .java file
+                    Path javaFile = sourcesDir.resolve(className + ".java");
+                    Files.createDirectories(javaFile.getParent());
+                    Files.writeString(javaFile, source);
+                    decompiled++;
+                } else {
+                    errors++;
+                }
+            } catch (Exception e) {
+                System.err.println("  Warning: failed to decompile " + className + ": " + e.getMessage());
+                errors++;
+            }
+        }
+
+        System.out.println("  Decompiled " + decompiled + " classes to Java source" +
+                (errors > 0 ? " (" + errors + " errors)" : ""));
         System.out.println("  Project generated at: " + projectDir);
-        System.out.println("  Note: Use a decompiler (CFR/Procyon) on target/classes/ to generate .java sources");
+    }
+
+    /**
+     * In-memory type loader backed by our class bytes map.
+     * Allows Procyon to resolve classes without writing to disk first.
+     */
+    private static class InMemoryTypeLoader implements ITypeLoader {
+        private final Map<String, byte[]> classBytesMap;
+
+        InMemoryTypeLoader(Map<String, byte[]> classBytesMap) {
+            this.classBytesMap = classBytesMap;
+        }
+
+        @Override
+        public boolean tryLoadType(String internalName, Buffer buffer) {
+            byte[] bytes = classBytesMap.get(internalName);
+            if (bytes != null) {
+                buffer.reset(bytes.length);
+                buffer.putByteArray(bytes, 0, bytes.length);
+                buffer.position(0);
+                return true;
+            }
+            return false;
+        }
     }
 
     private static void writePom(Path projectDir) throws IOException {

@@ -11,7 +11,9 @@ import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.tree.*;
 
 import java.io.FileOutputStream;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
@@ -130,7 +132,7 @@ class EngineTest {
      * Test: MethodHookVisitor injects entry hook
      */
     @Test
-    void testHookInjection() {
+    void testMethodEntryHookInjection() {
         // Create a simple method
         MethodNode mn = new MethodNode(Opcodes.ACC_PUBLIC, "tick", "()V", null, null);
         mn.instructions.add(new InsnNode(Opcodes.RETURN));
@@ -142,7 +144,7 @@ class EngineTest {
                 .targetDescriptor("()V")
                 .build();
 
-        int injected = MethodHookVisitor.injectEntryHooks(mn, java.util.List.of(hook));
+        int injected = MethodHookVisitor.injectEntryHooks(mn, List.of(hook));
         assertEquals(1, injected);
 
         // Verify the instructions were added (should have more than just RETURN now)
@@ -150,12 +152,102 @@ class EngineTest {
     }
 
     /**
-     * Test: EventBus class generation produces valid bytecode
+     * Test: MethodHookVisitor injects exit hooks before all return instructions
+     */
+    @Test
+    void testMethodExitHookInjection() {
+        MethodNode mn = new MethodNode(Opcodes.ACC_PUBLIC, "process", "()V", null, null);
+        // Two return paths
+        LabelNode label = new LabelNode();
+        mn.instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        mn.instructions.add(new JumpInsnNode(Opcodes.IFNULL, label));
+        mn.instructions.add(new InsnNode(Opcodes.RETURN)); // early return
+        mn.instructions.add(label);
+        mn.instructions.add(new InsnNode(Opcodes.RETURN)); // normal return
+
+        HookDefinition hook = HookDefinition.builder("onProcessExit")
+                .type(HookDefinition.HookType.METHOD_EXIT)
+                .targetClass("Client")
+                .targetMember("process")
+                .targetDescriptor("()V")
+                .build();
+
+        int injected = MethodHookVisitor.injectExitHooks(mn, List.of(hook));
+        assertEquals(2, injected); // One hook injected before each RETURN
+    }
+
+    /**
+     * Test: MethodHookVisitor injects field SET hooks
+     */
+    @Test
+    void testFieldSetHookInjection() {
+        // Create a method that sets a field
+        MethodNode mn = new MethodNode(Opcodes.ACC_PUBLIC, "update", "()V", null, null);
+        mn.instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        mn.instructions.add(new InsnNode(Opcodes.ICONST_1));
+        mn.instructions.add(new FieldInsnNode(Opcodes.PUTFIELD, "Client", "gameState", "I"));
+        mn.instructions.add(new InsnNode(Opcodes.RETURN));
+
+        HookDefinition hook = HookDefinition.builder("onGameStateChange")
+                .type(HookDefinition.HookType.FIELD_SET)
+                .targetClass("Client")
+                .targetMember("gameState")
+                .targetDescriptor("I")
+                .build();
+
+        int injected = MethodHookVisitor.injectFieldSetHooks(mn, "gameState", "I", List.of(hook));
+        assertEquals(1, injected);
+        assertTrue(mn.instructions.size() > 4); // More instructions now
+    }
+
+    /**
+     * Test: MethodHookVisitor injects field GET hooks
+     */
+    @Test
+    void testFieldGetHookInjection() {
+        // Create a method that reads a field
+        MethodNode mn = new MethodNode(Opcodes.ACC_PUBLIC, "getState", "()I", null, null);
+        mn.instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        mn.instructions.add(new FieldInsnNode(Opcodes.GETFIELD, "Client", "gameState", "I"));
+        mn.instructions.add(new InsnNode(Opcodes.IRETURN));
+
+        HookDefinition hook = HookDefinition.builder("onGameStateRead")
+                .type(HookDefinition.HookType.FIELD_GET)
+                .targetClass("Client")
+                .targetMember("gameState")
+                .targetDescriptor("I")
+                .build();
+
+        int injected = MethodHookVisitor.injectFieldGetHooks(mn, "gameState", "I", List.of(hook));
+        assertEquals(1, injected);
+        assertTrue(mn.instructions.size() > 3);
+    }
+
+    /**
+     * Test: EventBus class generation produces valid bytecode with listener support
      */
     @Test
     void testEventBusGeneration() {
         ClassNode eventBus = EventBus.generateEventBusClass();
         assertEquals("com/runetek/hooks/EventBus", eventBus.name);
+
+        // Should have fire, register, unregister, <init>, <clinit> methods
+        assertTrue(eventBus.methods.size() >= 4);
+
+        // Verify fire method exists
+        boolean hasFire = eventBus.methods.stream()
+                .anyMatch(m -> m.name.equals("fire") && m.desc.equals(EventBus.FIRE_DESCRIPTOR));
+        assertTrue(hasFire, "EventBus should have fire method");
+
+        // Verify register method exists
+        boolean hasRegister = eventBus.methods.stream()
+                .anyMatch(m -> m.name.equals("register"));
+        assertTrue(hasRegister, "EventBus should have register method");
+
+        // Verify unregister method exists
+        boolean hasUnregister = eventBus.methods.stream()
+                .anyMatch(m -> m.name.equals("unregister"));
+        assertTrue(hasUnregister, "EventBus should have unregister method");
 
         // Should compile to valid bytes
         byte[] bytes = AsmUtil.toBytesNoFrames(eventBus);
@@ -165,6 +257,27 @@ class EngineTest {
         // Should be loadable back
         ClassNode loaded = JarLoader.loadClass(bytes);
         assertEquals("com/runetek/hooks/EventBus", loaded.name);
+    }
+
+    /**
+     * Test: EventListener interface generation
+     */
+    @Test
+    void testEventListenerGeneration() {
+        ClassNode listener = EventBus.generateListenerInterface();
+        assertEquals("com/runetek/hooks/EventListener", listener.name);
+        assertTrue((listener.access & Opcodes.ACC_INTERFACE) != 0);
+        assertTrue((listener.access & Opcodes.ACC_ABSTRACT) != 0);
+
+        // Should have the onEvent method
+        boolean hasOnEvent = listener.methods.stream()
+                .anyMatch(m -> m.name.equals("onEvent"));
+        assertTrue(hasOnEvent, "EventListener should have onEvent method");
+
+        // Should compile to valid bytes
+        byte[] bytes = AsmUtil.toBytesNoFrames(listener);
+        assertNotNull(bytes);
+        assertTrue(bytes.length > 0);
     }
 
     /**
@@ -186,6 +299,76 @@ class EngineTest {
 
         // Verify output was created
         assertTrue(outputDir.resolve("classes").toFile().exists());
+    }
+
+    /**
+     * Test: Full pipeline with hook injection
+     */
+    @Test
+    void testFullPipelineWithHooks() throws Exception {
+        // Create synthetic JAR
+        Path inputJar = createSyntheticJar();
+        Path outputDir = tempDir.resolve("output-hooks");
+
+        // Write hook definitions
+        Path hooksFile = tempDir.resolve("hooks.json");
+        String hooksJson = """
+                [
+                  {
+                    "name": "onBufferRead",
+                    "type": "METHOD_ENTRY",
+                    "targetClass": "Buffer",
+                    "targetMember": "read",
+                    "targetDescriptor": "()I"
+                  }
+                ]
+                """;
+        Files.writeString(hooksFile, hooksJson);
+
+        EngineConfig config = EngineConfig.builder()
+                .inputJar(inputJar)
+                .outputDir(outputDir)
+                .hooksFile(hooksFile)
+                .build();
+
+        DeobfuscatorEngine engine = new DeobfuscatorEngine(config);
+        engine.run();
+
+        assertTrue(outputDir.resolve("classes").toFile().exists());
+    }
+
+    /**
+     * Test: Hook definitions JSON round-trip
+     */
+    @Test
+    void testHookDefinitionsFromJson() throws Exception {
+        Path hooksFile = tempDir.resolve("hooks.json");
+        String json = """
+                [
+                  {
+                    "name": "onLogin",
+                    "type": "METHOD_ENTRY",
+                    "targetClass": "Client",
+                    "targetMember": "processLogin",
+                    "targetDescriptor": "(II)V"
+                  },
+                  {
+                    "name": "onGameStateChange",
+                    "type": "FIELD_SET",
+                    "targetClass": "Client",
+                    "targetMember": "gameState",
+                    "targetDescriptor": "I"
+                  }
+                ]
+                """;
+        Files.writeString(hooksFile, json);
+
+        HookRegistry registry = new HookRegistry();
+        registry.loadFromFile(hooksFile);
+
+        assertEquals(2, registry.size());
+        assertEquals(1, registry.hooksForMethod("Client", "processLogin", "(II)V").size());
+        assertEquals(1, registry.hooksForField("Client", "gameState").size());
     }
 
     // ---- Helper methods to create synthetic obfuscated classes ----
