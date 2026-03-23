@@ -17,10 +17,12 @@ public final class EngineConfig {
     private final boolean skipHooks;
     private final boolean decompile;
     private final boolean verbose;
+    private final String profileName;
+    private final int revision;
 
     private EngineConfig(Path inputJar, Path outputDir, Path mappingsFile, Path hooksFile,
                          Path outputJar, boolean skipRenaming, boolean skipHooks,
-                         boolean decompile, boolean verbose) {
+                         boolean decompile, boolean verbose, String profileName, int revision) {
         this.inputJar = inputJar;
         this.outputDir = outputDir;
         this.mappingsFile = mappingsFile;
@@ -30,6 +32,8 @@ public final class EngineConfig {
         this.skipHooks = skipHooks;
         this.decompile = decompile;
         this.verbose = verbose;
+        this.profileName = profileName;
+        this.revision = revision;
     }
 
     public Path inputJar() { return inputJar; }
@@ -41,6 +45,8 @@ public final class EngineConfig {
     public boolean skipHooks() { return skipHooks; }
     public boolean decompile() { return decompile; }
     public boolean verbose() { return verbose; }
+    public String profileName() { return profileName; }
+    public int revision() { return revision; }
 
     public static Builder builder() {
         return new Builder();
@@ -56,6 +62,8 @@ public final class EngineConfig {
         private boolean skipHooks;
         private boolean decompile;
         private boolean verbose;
+        private String profileName;
+        private int revision;
 
         public Builder inputJar(Path p) { this.inputJar = p; return this; }
         public Builder outputDir(Path p) { this.outputDir = p; return this; }
@@ -66,12 +74,14 @@ public final class EngineConfig {
         public Builder skipHooks(boolean b) { this.skipHooks = b; return this; }
         public Builder decompile(boolean b) { this.decompile = b; return this; }
         public Builder verbose(boolean b) { this.verbose = b; return this; }
+        public Builder profileName(String s) { this.profileName = s; return this; }
+        public Builder revision(int r) { this.revision = r; return this; }
 
         public EngineConfig build() {
             if (inputJar == null) throw new IllegalStateException("inputJar is required");
             if (outputDir == null) throw new IllegalStateException("outputDir is required");
             return new EngineConfig(inputJar, outputDir, mappingsFile, hooksFile, outputJar,
-                    skipRenaming, skipHooks, decompile, verbose);
+                    skipRenaming, skipHooks, decompile, verbose, profileName, revision);
         }
     }
 }

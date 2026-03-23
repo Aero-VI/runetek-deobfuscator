@@ -1,5 +1,7 @@
 package com.runetek.deobfuscator.engine;
 
+import com.runetek.deobfuscator.dictionary.ProfileRegistry;
+import com.runetek.deobfuscator.dictionary.RevisionProfile;
 import com.runetek.deobfuscator.output.ClassWriter;
 import com.runetek.deobfuscator.output.JarWriter;
 import com.runetek.deobfuscator.output.MappingExporter;
@@ -8,6 +10,7 @@ import com.runetek.deobfuscator.phase1.HeuristicRenamer;
 import com.runetek.deobfuscator.phase1.MappingStore;
 import com.runetek.deobfuscator.phase2.HookInjector;
 import com.runetek.deobfuscator.phase2.HookRegistry;
+import com.runetek.deobfuscator.phase3.DecompilationPhase;
 import com.runetek.deobfuscator.util.JarLoader;
 
 import java.nio.file.Files;
@@ -27,11 +30,31 @@ public class DeobfuscatorEngine {
         this.services = new ServiceRegistry();
         this.pipeline = new TransformPipeline();
 
+        // Resolve revision profile
+        ProfileRegistry profileRegistry = new ProfileRegistry();
+        RevisionProfile profile;
+        if (config.profileName() != null) {
+            profile = profileRegistry.findByName(config.profileName());
+            if (profile == null) {
+                throw new IllegalArgumentException("Unknown profile: " + config.profileName());
+            }
+        } else if (config.revision() > 0) {
+            profile = profileRegistry.findByRevision(config.revision());
+            if (profile == null) {
+                System.out.println("Warning: No profile found for revision " + config.revision() + ", using default");
+                profile = profileRegistry.getDefault();
+            }
+        } else {
+            profile = profileRegistry.getDefault();
+        }
+        System.out.println("Using profile: " + profile.name());
+
         // Register core services
         MappingStore mappingStore = new MappingStore();
         HookRegistry hookRegistry = new HookRegistry();
         services.register(MappingStore.class, mappingStore);
         services.register(HookRegistry.class, hookRegistry);
+        services.register(RevisionProfile.class, profile);
 
         // Load existing mappings if provided
         if (config.mappingsFile() != null && Files.exists(config.mappingsFile())) {
@@ -51,6 +74,9 @@ public class DeobfuscatorEngine {
         }
         if (!config.skipHooks()) {
             pipeline.addPhase(new HookInjector());
+        }
+        if (config.decompile()) {
+            pipeline.addPhase(new DecompilationPhase());
         }
     }
 

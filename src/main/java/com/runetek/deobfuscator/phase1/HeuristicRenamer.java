@@ -1,11 +1,13 @@
 package com.runetek.deobfuscator.phase1;
 
+import com.runetek.deobfuscator.dictionary.RevisionProfile;
 import com.runetek.deobfuscator.engine.TransformContext;
 import com.runetek.deobfuscator.engine.TransformPhase;
 import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.FieldNode;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -28,6 +30,24 @@ public class HeuristicRenamer implements TransformPhase {
         ClassHeuristicAnalyzer classAnalyzer = new ClassHeuristicAnalyzer();
         FieldPatternMatcher fieldMatcher = new FieldPatternMatcher();
         MethodSignatureMatcher methodMatcher = new MethodSignatureMatcher();
+
+        // Load profile-specific heuristic patterns
+        if (context.services().has(RevisionProfile.class)) {
+            RevisionProfile profile = context.services().resolve(RevisionProfile.class);
+            List<ClassHeuristicAnalyzer.HeuristicPattern> profilePatterns = profile.getClassPatterns();
+            for (ClassHeuristicAnalyzer.HeuristicPattern pattern : profilePatterns) {
+                classAnalyzer.addPattern(pattern);
+            }
+            System.out.println("  Loaded " + profilePatterns.size() + " profile-specific patterns from " + profile.name());
+
+            // Apply base mappings from profile
+            Map<String, String> baseMappings = profile.getBaseClassMappings();
+            for (Map.Entry<String, String> entry : baseMappings.entrySet()) {
+                if (!mappings.hasClassMapping(entry.getKey())) {
+                    mappings.mapClass(entry.getKey(), entry.getValue());
+                }
+            }
+        }
 
         Map<String, Integer> nameUsage = new HashMap<String, Integer>();
 

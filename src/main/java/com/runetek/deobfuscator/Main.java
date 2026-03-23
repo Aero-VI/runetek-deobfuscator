@@ -47,6 +47,10 @@ public class Main {
                 configBuilder.decompile(true);
             } else if ("--verbose".equals(arg)) {
                 configBuilder.verbose(true);
+            } else if ("--profile".equals(arg)) {
+                configBuilder.profileName(args[++i]);
+            } else if ("--revision".equals(arg)) {
+                configBuilder.revision(Integer.parseInt(args[++i]));
             } else {
                 System.err.println("Unknown option: " + arg);
                 printUsage();
@@ -88,5 +92,7 @@ public class Main {
         System.out.println("  --skip-hooks        Skip hook injection phase");
         System.out.println("  --decompile         Decompile to Java source");
         System.out.println("  --verbose           Verbose output");
+        System.out.println("  --profile <name>    Use specific profile (e.g. 'RuneTek 3', 'RuneTek 4')");
+        System.out.println("  --revision <num>    Auto-detect profile by revision number (e.g. 508, 317)");
     }
 }
