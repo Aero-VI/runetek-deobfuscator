@@ -137,6 +137,12 @@ public class HeuristicRenamer implements TransformPhase {
             context.classes().clear();
             context.classes().putAll(renamedClasses);
             System.out.println("    Applied " + mappings.totalMappings() + " total mappings");
+
+            // Step 4: Fix Class.forName("obfuscated") string constants
+            int forNameFixes = ClassForNameFixer.fix(context.classes(), mappings.classMappings());
+            if (forNameFixes > 0) {
+                System.out.println("    Fixed " + forNameFixes + " Class.forName() string constants");
+            }
         } else {
             System.out.println("    No mappings to apply");
         }

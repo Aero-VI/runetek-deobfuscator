@@ -4,8 +4,7 @@ import org.objectweb.asm.commons.ClassRemapper;
 import org.objectweb.asm.commons.Remapper;
 import org.objectweb.asm.tree.ClassNode;
 
-import java.util.LinkedHashMap;
-import java.util.Map;
+import java.util.*;
 
 /**
  * Applies name mappings to all classes using ASM's Remapper infrastructure.
@@ -49,9 +48,14 @@ public class RenamingTransformer {
 
     /**
      * Custom Remapper that uses our MappingStore.
+     * Tracks used names per class+descriptor to prevent duplicate method names.
      */
     private static class MappingRemapper extends Remapper {
         private final MappingStore mappings;
+        // Track used method names per "owner+desc" to avoid duplicates
+        private final Map<String, Set<String>> usedMethodNames = new HashMap<String, Set<String>>();
+        // Cache resolved names so the same (owner,name,desc) always maps to the same result
+        private final Map<String, String> methodNameCache = new HashMap<String, String>();
 
         MappingRemapper(MappingStore mappings) {
             this.mappings = mappings;
@@ -64,14 +68,62 @@ public class RenamingTransformer {
 
         @Override
         public String mapFieldName(String owner, String name, String descriptor) {
-            return mappings.resolveField(owner, name, descriptor);
+            String cacheKey = "F:" + owner + "." + name + ":" + descriptor;
+            String cached = methodNameCache.get(cacheKey);
+            if (cached != null) return cached;
+
+            String resolved = mappings.resolveField(owner, name, descriptor);
+
+            // Deduplicate fields with same name in same class
+            String usageKey = "F:" + owner;
+            Set<String> used = usedMethodNames.get(usageKey);
+            if (used == null) {
+                used = new HashSet<String>();
+                usedMethodNames.put(usageKey, used);
+            }
+
+            String finalName = resolved;
+            if (used.contains(resolved)) {
+                int suffix = 1;
+                while (used.contains(resolved + suffix)) suffix++;
+                finalName = resolved + suffix;
+            }
+            used.add(finalName);
+            methodNameCache.put(cacheKey, finalName);
+            return finalName;
         }
 
         @Override
         public String mapMethodName(String owner, String name, String descriptor) {
-            // Don't remap constructors or special methods
             if (name.startsWith("<")) return name;
-            return mappings.resolveMethod(owner, name, descriptor);
+
+            // Check cache first for consistency
+            String cacheKey = owner + "." + name + "+" + descriptor;
+            String cached = methodNameCache.get(cacheKey);
+            if (cached != null) return cached;
+
+            String resolved = mappings.resolveMethod(owner, name, descriptor);
+
+            // Deduplicate: if this name+desc is already used in this class, suffix it
+            String usageKey = owner + "+" + descriptor;
+            Set<String> used = usedMethodNames.get(usageKey);
+            if (used == null) {
+                used = new HashSet<String>();
+                usedMethodNames.put(usageKey, used);
+            }
+
+            String finalName = resolved;
+            if (used.contains(resolved)) {
+                // Append incrementing suffix until unique
+                int suffix = 1;
+                while (used.contains(resolved + suffix)) {
+                    suffix++;
+                }
+                finalName = resolved + suffix;
+            }
+            used.add(finalName);
+            methodNameCache.put(cacheKey, finalName);
+            return finalName;
         }
     }
 }
