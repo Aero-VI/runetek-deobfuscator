@@ -41,66 +41,76 @@ public class JS5Bypass {
     private static int patchMethod(MethodNode mn, String className) {
         int patches = 0;
 
-        // Strategy 1: Find BIPUSH 10 followed by PUTSTATIC to the state field,
-        // then look for the nearby BIPUSH 5 PUTSTATIC to the game state field.
-        // Patch the 10 to 30 (skip JS5, go straight to interface loading).
+        // Strategy: Find ALL "value 5 -> PUTSTATIC field:I" patterns where the same
+        // field is also set to 10 elsewhere in the method (confirming it's the game state).
+        // Then patch all the 5s to 10 (skip JS5, go to resource loading).
+
+        // First: collect all static int fields that are set to both 5 and 10 in this method
+        java.util.Map<String, java.util.Set<Integer>> fieldValues = new java.util.HashMap<String, java.util.Set<Integer>>();
 
         for (AbstractInsnNode insn = mn.instructions.getFirst(); insn != null; insn = insn.getNext()) {
-            // Look for pattern: BIPUSH 10 -> PUTSTATIC -> ... -> BIPUSH 5 -> PUTSTATIC
-            // This is: Widget92.intField4 = 10; ... Widget87.intField0 = 5;
-            if (!isIntPush(insn, 10)) continue;
+            if (insn.getOpcode() != Opcodes.PUTSTATIC) continue;
+            FieldInsnNode fi = (FieldInsnNode) insn;
+            if (!"I".equals(fi.desc)) continue;
 
-            AbstractInsnNode next1 = nextReal(insn);
-            if (!(next1 instanceof FieldInsnNode)) continue;
-            if (next1.getOpcode() != Opcodes.PUTSTATIC) continue;
-            FieldInsnNode stateField = (FieldInsnNode) next1;
-            if (!"I".equals(stateField.desc)) continue;
+            AbstractInsnNode prev = prevReal(insn);
+            if (prev == null) continue;
 
-            // Now scan forward a few instructions for BIPUSH 5 -> PUTSTATIC
-            AbstractInsnNode scan = next1;
-            boolean foundJS5Trigger = false;
-            for (int i = 0; i < 8; i++) {
-                scan = nextReal(scan);
-                if (scan == null) break;
+            int val = getIntValue(prev);
+            if (val < 0) continue;
 
-                if (isIntPush(scan, 5)) {
-                    AbstractInsnNode afterFive = nextReal(scan);
-                    if (afterFive instanceof FieldInsnNode && afterFive.getOpcode() == Opcodes.PUTSTATIC) {
-                        FieldInsnNode gameStateField = (FieldInsnNode) afterFive;
-                        if ("I".equals(gameStateField.desc)) {
-                            foundJS5Trigger = true;
-                            break;
-                        }
-                    }
-                }
+            String key = fi.owner + "." + fi.name;
+            java.util.Set<Integer> vals = fieldValues.get(key);
+            if (vals == null) {
+                vals = new java.util.HashSet<Integer>();
+                fieldValues.put(key, vals);
             }
+            vals.add(val);
+        }
 
-            if (foundJS5Trigger) {
-                // Patch: change the state from 10 to 30 (skip JS5)
-                replaceIntPush(mn, insn, 30);
-                System.out.println("    [JS5 Bypass] Patched state 10→30 in " + className + "." + mn.name + mn.desc);
-                patches++;
+        // Find fields set to both 5 and 10 — that's the game state field
+        String gameStateKey = null;
+        for (java.util.Map.Entry<String, java.util.Set<Integer>> entry : fieldValues.entrySet()) {
+            java.util.Set<Integer> vals = entry.getValue();
+            if (vals.contains(5) && vals.contains(10)) {
+                gameStateKey = entry.getKey();
+                break;
             }
         }
 
-        // Strategy 2: Find and NOP out the JS5 socket connection calls
-        // Look for string constants "js5connect", "js5io", "js5crc" and replace
-        // the error handler to just retry/continue
+        if (gameStateKey == null) return 0;
+
+        String gsOwner = gameStateKey.substring(0, gameStateKey.indexOf('.'));
+        String gsName = gameStateKey.substring(gameStateKey.indexOf('.') + 1);
+
+        // Now patch ALL assignments of 5 to this field → change to 10
         for (AbstractInsnNode insn = mn.instructions.getFirst(); insn != null; insn = insn.getNext()) {
-            if (insn instanceof LdcInsnNode) {
-                LdcInsnNode ldc = (LdcInsnNode) insn;
-                if (ldc.cst instanceof String) {
-                    String str = (String) ldc.cst;
-                    if ("js5connect".equals(str) || "js5io".equals(str) || "js5crc".equals(str) ||
-                        "js5connect_outofdate".equals(str) || "js5connect_full".equals(str)) {
-                        // Don't remove these — just log that we found them
-                        // The state patch above is what actually fixes the issue
-                    }
-                }
-            }
+            if (insn.getOpcode() != Opcodes.PUTSTATIC) continue;
+            FieldInsnNode fi = (FieldInsnNode) insn;
+            if (!fi.owner.equals(gsOwner) || !fi.name.equals(gsName)) continue;
+
+            AbstractInsnNode prev = prevReal(insn);
+            if (prev == null) continue;
+            if (getIntValue(prev) != 5) continue;
+
+            // Patch: 5 → 10
+            replaceIntPush(mn, prev, 10);
+            System.out.println("    [JS5 Bypass] Patched gameState 5→10 in " + className + "." + mn.name
+                    + " (field " + gsOwner + "." + gsName + ")");
+            patches++;
         }
 
         return patches;
+    }
+
+    private static int getIntValue(AbstractInsnNode insn) {
+        if (insn.getOpcode() >= Opcodes.ICONST_0 && insn.getOpcode() <= Opcodes.ICONST_5) {
+            return insn.getOpcode() - Opcodes.ICONST_0;
+        }
+        if (insn instanceof IntInsnNode && (insn.getOpcode() == Opcodes.BIPUSH || insn.getOpcode() == Opcodes.SIPUSH)) {
+            return ((IntInsnNode) insn).operand;
+        }
+        return -1;
     }
 
     private static boolean isIntPush(AbstractInsnNode insn, int value) {
@@ -119,6 +129,14 @@ public class JS5Bypass {
     private static void replaceIntPush(MethodNode mn, AbstractInsnNode insn, int newValue) {
         IntInsnNode replacement = new IntInsnNode(Opcodes.BIPUSH, newValue);
         mn.instructions.set(insn, replacement);
+    }
+
+    private static AbstractInsnNode prevReal(AbstractInsnNode insn) {
+        AbstractInsnNode prev = insn.getPrevious();
+        while (prev != null && prev.getOpcode() < 0) {
+            prev = prev.getPrevious();
+        }
+        return prev;
     }
 
     private static AbstractInsnNode nextReal(AbstractInsnNode insn) {
