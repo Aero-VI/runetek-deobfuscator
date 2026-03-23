@@ -11,6 +11,7 @@ public record EngineConfig(
         Path outputDir,
         Path mappingsFile,
         Path hooksFile,
+        Path outputJar,
         boolean skipRenaming,
         boolean skipHooks,
         boolean decompile,
@@ -25,6 +26,7 @@ public record EngineConfig(
         private Path outputDir;
         private Path mappingsFile;
         private Path hooksFile;
+        private Path outputJar;
         private boolean skipRenaming;
         private boolean skipHooks;
         private boolean decompile;
@@ -34,6 +36,7 @@ public record EngineConfig(
         public Builder outputDir(Path p) { this.outputDir = p; return this; }
         public Builder mappingsFile(Path p) { this.mappingsFile = p; return this; }
         public Builder hooksFile(Path p) { this.hooksFile = p; return this; }
+        public Builder outputJar(Path p) { this.outputJar = p; return this; }
         public Builder skipRenaming(boolean b) { this.skipRenaming = b; return this; }
         public Builder skipHooks(boolean b) { this.skipHooks = b; return this; }
         public Builder decompile(boolean b) { this.decompile = b; return this; }
@@ -42,7 +45,7 @@ public record EngineConfig(
         public EngineConfig build() {
             if (inputJar == null) throw new IllegalStateException("inputJar is required");
             if (outputDir == null) throw new IllegalStateException("outputDir is required");
-            return new EngineConfig(inputJar, outputDir, mappingsFile, hooksFile,
+            return new EngineConfig(inputJar, outputDir, mappingsFile, hooksFile, outputJar,
                     skipRenaming, skipHooks, decompile, verbose);
         }
     }

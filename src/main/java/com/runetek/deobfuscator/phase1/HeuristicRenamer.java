@@ -11,14 +11,16 @@ import java.util.Map;
  * Phase 1: Heuristic Mapping & Renaming.
  *
  * Analyzes all loaded classes to identify obfuscated names and
- * applies heuristic-based renaming using structural pattern matching.
+ * applies heuristic-based renaming using structural pattern matching
+ * and string literal analysis.
  *
  * Pipeline:
- *   1. Analyze each class with ClassHeuristicAnalyzer
- *   2. Analyze fields with FieldPatternMatcher
- *   3. Analyze methods with MethodSignatureMatcher
- *   4. Build complete mapping set
- *   5. Apply mappings via RenamingTransformer (ASM Remapper)
+ *   1. Analyze each class with ClassHeuristicAnalyzer (structural patterns)
+ *   2. Fallback to StringLiteralAnalyzer for classes not matched by structure
+ *   3. Analyze fields with FieldPatternMatcher
+ *   4. Analyze methods with MethodSignatureMatcher + StringLiteralAnalyzer
+ *   5. Build complete mapping set
+ *   6. Apply mappings via RenamingTransformer (ASM Remapper)
  */
 public class HeuristicRenamer implements TransformPhase {
 
@@ -46,8 +48,14 @@ public class HeuristicRenamer implements TransformPhase {
             // Skip already-mapped classes
             if (mappings.hasClassMapping(originalName)) continue;
 
-            // Try heuristic analysis
+            // Try structural heuristic analysis first
             String suggestedName = classAnalyzer.analyze(cn);
+
+            // Fallback: try string literal analysis
+            if (suggestedName == null) {
+                suggestedName = StringLiteralAnalyzer.suggestClassName(cn);
+            }
+
             if (suggestedName != null) {
                 // Handle name collisions by appending a counter
                 int count = nameUsage.getOrDefault(suggestedName, 0);
@@ -92,8 +100,15 @@ public class HeuristicRenamer implements TransformPhase {
                     });
             }
 
-            // Analyze methods
+            // Analyze methods via signature matching
             Map<String, String> methodSuggestions = methodMatcher.analyzeMethods(cn, simpleName);
+
+            // Also try string literal analysis for methods not already matched
+            Map<String, String> stringMethodSuggestions = StringLiteralAnalyzer.suggestMethodNames(cn);
+            for (Map.Entry<String, String> sms : stringMethodSuggestions.entrySet()) {
+                methodSuggestions.putIfAbsent(sms.getKey(), sms.getValue());
+            }
+
             for (Map.Entry<String, String> ms : methodSuggestions.entrySet()) {
                 String[] parts = ms.getKey().split("\\+", 2);
                 if (parts.length == 2) {

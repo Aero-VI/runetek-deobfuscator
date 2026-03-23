@@ -1,6 +1,7 @@
 package com.runetek.deobfuscator.engine;
 
 import com.runetek.deobfuscator.output.ClassWriter;
+import com.runetek.deobfuscator.output.JarWriter;
 import com.runetek.deobfuscator.output.MappingExporter;
 import com.runetek.deobfuscator.output.ProjectGenerator;
 import com.runetek.deobfuscator.phase1.HeuristicRenamer;
@@ -73,6 +74,11 @@ public class DeobfuscatorEngine {
 
         // Write transformed classes
         ClassWriter.writeClasses(context, config.outputDir().resolve("classes"));
+
+        // Write output JAR if requested
+        if (config.outputJar() != null) {
+            JarWriter.writeJar(context, config.outputJar(), null);
+        }
 
         // Export mappings
         MappingStore mappings = services.resolve(MappingStore.class);

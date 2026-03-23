@@ -38,6 +38,7 @@ public class Main {
             switch (args[i]) {
                 case "--mappings" -> configBuilder.mappingsFile(Path.of(args[++i]));
                 case "--hooks" -> configBuilder.hooksFile(Path.of(args[++i]));
+                case "--output-jar" -> configBuilder.outputJar(Path.of(args[++i]));
                 case "--skip-rename" -> configBuilder.skipRenaming(true);
                 case "--skip-hooks" -> configBuilder.skipHooks(true);
                 case "--decompile" -> configBuilder.decompile(true);
@@ -79,6 +80,7 @@ public class Main {
         System.out.println("Options:");
         System.out.println("  --mappings <file>   Load/save name mappings (JSON)");
         System.out.println("  --hooks <file>      Load hook definitions (JSON)");
+        System.out.println("  --output-jar <file> Write deobfuscated classes to a JAR");
         System.out.println("  --skip-rename       Skip heuristic renaming phase");
         System.out.println("  --skip-hooks        Skip hook injection phase");
         System.out.println("  --decompile         Decompile to Java source");
