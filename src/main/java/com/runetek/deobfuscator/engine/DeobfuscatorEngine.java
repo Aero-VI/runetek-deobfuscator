@@ -98,9 +98,6 @@ public class DeobfuscatorEngine {
         System.out.println("\nWriting output...");
         Files.createDirectories(config.outputDir());
 
-        // Write transformed classes
-        ClassWriter.writeClasses(context, config.outputDir().resolve("classes"));
-
         // Write output JAR if requested
         if (config.outputJar() != null) {
             JarWriter.writeJar(context, config.outputJar(), null);
@@ -113,10 +110,13 @@ public class DeobfuscatorEngine {
             System.out.println("  Mappings saved to: " + config.mappingsFile());
         }
 
-        // Generate re-compilable project if decompile is enabled
+        // Generate runnable project (with decompiled reference sources if --decompile)
         if (config.decompile()) {
-            System.out.println("  Generating Maven project with decompiled sources...");
+            System.out.println("  Generating runnable project with decompiled sources...");
             ProjectGenerator.generate(context, config.outputDir());
+        } else {
+            // Just write classes and lib jar without decompilation
+            ClassWriter.writeClasses(context, config.outputDir().resolve("classes"));
         }
 
         // Print stats

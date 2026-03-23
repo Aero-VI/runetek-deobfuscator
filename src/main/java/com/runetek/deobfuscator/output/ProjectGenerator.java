@@ -29,7 +29,8 @@ public class ProjectGenerator {
      * Generate a complete runnable project structure in the output directory.
      */
     public static void generate(TransformContext context, Path outputDir) throws IOException {
-        Path projectDir = outputDir.resolve("deobfuscated-project");
+        // Output directly to the specified directory — no nested subfolder
+        Path projectDir = outputDir;
         Path sourcesDir = projectDir.resolve("src/main/java");
         Path refSourcesDir = projectDir.resolve("src/main/decompiled-reference");
         Path libDir = projectDir.resolve("lib");
@@ -56,15 +57,6 @@ public class ProjectGenerator {
         // Write the deobfuscated JAR into lib/
         Path libJar = libDir.resolve("deobfuscated-client.jar");
         JarWriter.writeJar(context, libJar, null);
-
-        // Write .class files into target/classes for direct execution
-        Path classesDir = projectDir.resolve("target/classes");
-        Files.createDirectories(classesDir);
-        for (Map.Entry<String, byte[]> entry : classBytesMap.entrySet()) {
-            Path classFile = classesDir.resolve(entry.getKey() + ".class");
-            Files.createDirectories(classFile.getParent());
-            Files.write(classFile, entry.getValue());
-        }
 
         // Generate Launcher.java
         writeLauncher(sourcesDir, appletClassName);
@@ -97,14 +89,22 @@ public class ProjectGenerator {
                 } else {
                     errors++;
                 }
+            } catch (OutOfMemoryError oom) {
+                System.err.println("  Warning: out of memory decompiling " + className + " — skipping (try -Xmx1g)");
+                errors++;
+                // Force GC to recover
+                System.gc();
             } catch (Exception e) {
                 System.err.println("  Warning: failed to decompile " + className + ": " + e.getMessage());
+                errors++;
+            } catch (Throwable t) {
+                System.err.println("  Warning: decompiler error on " + className + ": " + t.getMessage());
                 errors++;
             }
         }
 
         System.out.println("  Decompiled " + decompiled + " classes to reference sources" +
-                (errors > 0 ? " (" + errors + " errors)" : ""));
+                (errors > 0 ? " (" + errors + " skipped)" : ""));
         System.out.println("  Project generated at: " + projectDir);
         System.out.println("  → Open in IntelliJ, run 'Launch Client' configuration");
     }
@@ -357,7 +357,6 @@ public class ProjectGenerator {
                 + "src/main/java/                   # Launcher (compilable, editable)\n"
                 + "src/main/decompiled-reference/   # Decompiled .java sources (read-only reference)\n"
                 + "lib/deobfuscated-client.jar       # Modified bytecode (what actually runs)\n"
-                + "target/classes/                   # Extracted .class files\n"
                 + "```\n\n"
                 + "## Notes\n\n"
                 + "- The decompiled sources in `decompiled-reference/` are for **reading**, not compiling.\n"
