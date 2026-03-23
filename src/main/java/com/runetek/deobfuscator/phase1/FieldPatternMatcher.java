@@ -14,10 +14,10 @@ public class FieldPatternMatcher {
 
     /**
      * Analyze fields in a class and suggest renames.
-     * @return Map of original field name → suggested name
+     * @return Map of original field name to suggested name
      */
     public Map<String, String> analyzeFields(ClassNode cn, String className) {
-        Map<String, String> suggestions = new LinkedHashMap<>();
+        Map<String, String> suggestions = new LinkedHashMap<String, String>();
 
         int intIndex = 0;
         int stringIndex = 0;
@@ -31,11 +31,14 @@ public class FieldPatternMatcher {
             }
 
             // Track type counts for context
-            switch (fn.desc) {
-                case "I", "J" -> intIndex++;
-                case "Ljava/lang/String;" -> stringIndex++;
-                case "Z" -> boolIndex++;
-                default -> { if (fn.desc.startsWith("[")) arrayIndex++; }
+            if ("I".equals(fn.desc) || "J".equals(fn.desc)) {
+                intIndex++;
+            } else if ("Ljava/lang/String;".equals(fn.desc)) {
+                stringIndex++;
+            } else if ("Z".equals(fn.desc)) {
+                boolIndex++;
+            } else if (fn.desc.startsWith("[")) {
+                arrayIndex++;
             }
         }
 
@@ -43,117 +46,110 @@ public class FieldPatternMatcher {
     }
 
     private String suggestFieldName(FieldNode fn, String className, int intIdx, int strIdx, int boolIdx, int arrIdx) {
-        // Context-aware naming based on parent class type
-        return switch (className) {
-            case "Widget" -> suggestWidgetField(fn, intIdx, strIdx, boolIdx);
-            case "Buffer" -> suggestBufferField(fn, intIdx);
-            case "Node" -> suggestNodeField(fn, intIdx);
-            case "Model" -> suggestModelField(fn, intIdx, arrIdx);
-            case "Client" -> suggestClientField(fn, intIdx, strIdx);
-            default -> suggestGenericField(fn, intIdx, strIdx, boolIdx);
-        };
+        if ("Widget".equals(className)) return suggestWidgetField(fn, intIdx, strIdx, boolIdx);
+        if ("Buffer".equals(className)) return suggestBufferField(fn, intIdx);
+        if ("Node".equals(className)) return suggestNodeField(fn, intIdx);
+        if ("Model".equals(className)) return suggestModelField(fn, intIdx, arrIdx);
+        if ("Client".equals(className)) return suggestClientField(fn, intIdx, strIdx);
+        return suggestGenericField(fn, intIdx, strIdx, boolIdx);
     }
 
     private String suggestWidgetField(FieldNode fn, int intIdx, int strIdx, int boolIdx) {
-        if (fn.desc.equals("I")) {
-            return switch (intIdx) {
-                case 0 -> "id";
-                case 1 -> "parentId";
-                case 2 -> "type";
-                case 3 -> "contentType";
-                case 4 -> "x";
-                case 5 -> "y";
-                case 6 -> "width";
-                case 7 -> "height";
-                case 8 -> "opacity";
-                default -> "intField" + intIdx;
-            };
+        if ("I".equals(fn.desc)) {
+            switch (intIdx) {
+                case 0: return "id";
+                case 1: return "parentId";
+                case 2: return "type";
+                case 3: return "contentType";
+                case 4: return "x";
+                case 5: return "y";
+                case 6: return "width";
+                case 7: return "height";
+                case 8: return "opacity";
+                default: return "intField" + intIdx;
+            }
         }
-        if (fn.desc.equals("Ljava/lang/String;")) {
-            return switch (strIdx) {
-                case 0 -> "text";
-                case 1 -> "tooltip";
-                default -> "stringField" + strIdx;
-            };
+        if ("Ljava/lang/String;".equals(fn.desc)) {
+            switch (strIdx) {
+                case 0: return "text";
+                case 1: return "tooltip";
+                default: return "stringField" + strIdx;
+            }
         }
-        if (fn.desc.equals("Z")) {
-            return switch (boolIdx) {
-                case 0 -> "isHidden";
-                case 1 -> "isDraggable";
-                default -> "boolField" + boolIdx;
-            };
+        if ("Z".equals(fn.desc)) {
+            switch (boolIdx) {
+                case 0: return "isHidden";
+                case 1: return "isDraggable";
+                default: return "boolField" + boolIdx;
+            }
         }
         return null;
     }
 
     private String suggestBufferField(FieldNode fn, int intIdx) {
-        if (fn.desc.equals("[B")) return "payload";
-        if (fn.desc.equals("I")) {
+        if ("[B".equals(fn.desc)) return "payload";
+        if ("I".equals(fn.desc)) {
             return intIdx == 0 ? "position" : "capacity";
         }
         return null;
     }
 
     private String suggestNodeField(FieldNode fn, int intIdx) {
-        String selfDesc = "L" + fn.name + ";";
-        if (fn.desc.contains(";") && !fn.desc.equals("Ljava/lang/String;")) {
+        if (fn.desc.contains(";") && !"Ljava/lang/String;".equals(fn.desc)) {
             return intIdx == 0 ? "next" : "previous";
         }
-        if (fn.desc.equals("J")) return "key";
+        if ("J".equals(fn.desc)) return "key";
         return null;
     }
 
     private String suggestModelField(FieldNode fn, int intIdx, int arrIdx) {
-        if (fn.desc.equals("[I")) {
-            return switch (arrIdx) {
-                case 0 -> "verticesX";
-                case 1 -> "verticesY";
-                case 2 -> "verticesZ";
-                case 3 -> "triangleA";
-                case 4 -> "triangleB";
-                case 5 -> "triangleC";
-                case 6 -> "faceColors";
-                default -> "intArray" + arrIdx;
-            };
+        if ("[I".equals(fn.desc)) {
+            switch (arrIdx) {
+                case 0: return "verticesX";
+                case 1: return "verticesY";
+                case 2: return "verticesZ";
+                case 3: return "triangleA";
+                case 4: return "triangleB";
+                case 5: return "triangleC";
+                case 6: return "faceColors";
+                default: return "intArray" + arrIdx;
+            }
         }
-        if (fn.desc.equals("I")) {
-            return switch (intIdx) {
-                case 0 -> "vertexCount";
-                case 1 -> "triangleCount";
-                default -> "intField" + intIdx;
-            };
+        if ("I".equals(fn.desc)) {
+            switch (intIdx) {
+                case 0: return "vertexCount";
+                case 1: return "triangleCount";
+                default: return "intField" + intIdx;
+            }
         }
         return null;
     }
 
     private String suggestClientField(FieldNode fn, int intIdx, int strIdx) {
-        if (fn.desc.equals("I")) {
-            return switch (intIdx) {
-                case 0 -> "gameState";
-                case 1 -> "loginState";
-                case 2 -> "worldId";
-                default -> "clientInt" + intIdx;
-            };
+        if ("I".equals(fn.desc)) {
+            switch (intIdx) {
+                case 0: return "gameState";
+                case 1: return "loginState";
+                case 2: return "worldId";
+                default: return "clientInt" + intIdx;
+            }
         }
-        if (fn.desc.equals("Ljava/lang/String;")) {
-            return switch (strIdx) {
-                case 0 -> "username";
-                case 1 -> "password";
-                default -> "clientString" + strIdx;
-            };
+        if ("Ljava/lang/String;".equals(fn.desc)) {
+            switch (strIdx) {
+                case 0: return "username";
+                case 1: return "password";
+                default: return "clientString" + strIdx;
+            }
         }
         return null;
     }
 
     private String suggestGenericField(FieldNode fn, int intIdx, int strIdx, int boolIdx) {
-        // Generic fallback: give type-based sequential names
-        return switch (fn.desc) {
-            case "I" -> "intField" + intIdx;
-            case "J" -> "longField" + intIdx;
-            case "Z" -> "boolField" + boolIdx;
-            case "Ljava/lang/String;" -> "stringField" + strIdx;
-            default -> null;
-        };
+        if ("I".equals(fn.desc)) return "intField" + intIdx;
+        if ("J".equals(fn.desc)) return "longField" + intIdx;
+        if ("Z".equals(fn.desc)) return "boolField" + boolIdx;
+        if ("Ljava/lang/String;".equals(fn.desc)) return "stringField" + strIdx;
+        return null;
     }
 
     /**
@@ -161,7 +157,6 @@ public class FieldPatternMatcher {
      */
     public static boolean isObfuscatedName(String name) {
         if (name.length() <= 2) return true;
-        // Check if it's all lowercase single chars or looks like a/b/c/aa/ab pattern
         return name.matches("^[a-z]{1,3}$");
     }
 }

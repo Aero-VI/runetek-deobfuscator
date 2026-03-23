@@ -3,24 +3,17 @@ package com.runetek.deobfuscator.phase1;
 import com.runetek.deobfuscator.engine.TransformContext;
 import com.runetek.deobfuscator.engine.TransformPhase;
 import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.FieldNode;
 
 import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Phase 1: Heuristic Mapping & Renaming.
+ * Phase 1: Heuristic Mapping &amp; Renaming.
  *
  * Analyzes all loaded classes to identify obfuscated names and
  * applies heuristic-based renaming using structural pattern matching
  * and string literal analysis.
- *
- * Pipeline:
- *   1. Analyze each class with ClassHeuristicAnalyzer (structural patterns)
- *   2. Fallback to StringLiteralAnalyzer for classes not matched by structure
- *   3. Analyze fields with FieldPatternMatcher
- *   4. Analyze methods with MethodSignatureMatcher + StringLiteralAnalyzer
- *   5. Build complete mapping set
- *   6. Apply mappings via RenamingTransformer (ASM Remapper)
  */
 public class HeuristicRenamer implements TransformPhase {
 
@@ -36,8 +29,7 @@ public class HeuristicRenamer implements TransformPhase {
         FieldPatternMatcher fieldMatcher = new FieldPatternMatcher();
         MethodSignatureMatcher methodMatcher = new MethodSignatureMatcher();
 
-        // Track name collisions
-        Map<String, Integer> nameUsage = new HashMap<>();
+        Map<String, Integer> nameUsage = new HashMap<String, Integer>();
 
         // Step 1: Analyze all classes for class-level renames
         System.out.println("  Analyzing class patterns...");
@@ -45,24 +37,20 @@ public class HeuristicRenamer implements TransformPhase {
             String originalName = entry.getKey();
             ClassNode cn = entry.getValue();
 
-            // Skip already-mapped classes
             if (mappings.hasClassMapping(originalName)) continue;
 
-            // Try structural heuristic analysis first
             String suggestedName = classAnalyzer.analyze(cn);
 
-            // Fallback: try string literal analysis
             if (suggestedName == null) {
                 suggestedName = StringLiteralAnalyzer.suggestClassName(cn);
             }
 
             if (suggestedName != null) {
-                // Handle name collisions by appending a counter
-                int count = nameUsage.getOrDefault(suggestedName, 0);
-                nameUsage.put(suggestedName, count + 1);
-                String finalName = count == 0 ? suggestedName : suggestedName + count;
+                Integer count = nameUsage.get(suggestedName);
+                int countVal = count == null ? 0 : count;
+                nameUsage.put(suggestedName, countVal + 1);
+                String finalName = countVal == 0 ? suggestedName : suggestedName + countVal;
 
-                // Preserve package structure if any
                 String pkg = "";
                 int lastSlash = originalName.lastIndexOf('/');
                 if (lastSlash >= 0) {
@@ -82,7 +70,6 @@ public class HeuristicRenamer implements TransformPhase {
             ClassNode cn = entry.getValue();
             String resolvedClassName = mappings.resolveClass(className);
 
-            // Extract just the simple name for context
             String simpleName = resolvedClassName;
             int slash = simpleName.lastIndexOf('/');
             if (slash >= 0) simpleName = simpleName.substring(slash + 1);
@@ -90,23 +77,24 @@ public class HeuristicRenamer implements TransformPhase {
             // Analyze fields
             Map<String, String> fieldSuggestions = fieldMatcher.analyzeFields(cn, simpleName);
             for (Map.Entry<String, String> fs : fieldSuggestions.entrySet()) {
-                // Find the field descriptor
-                cn.fields.stream()
-                    .filter(f -> f.name.equals(fs.getKey()))
-                    .findFirst()
-                    .ifPresent(f -> {
+                for (FieldNode f : cn.fields) {
+                    if (f.name.equals(fs.getKey())) {
                         mappings.mapField(className, f.name, f.desc, fs.getValue());
                         context.incrementFieldsRenamed();
-                    });
+                        break;
+                    }
+                }
             }
 
             // Analyze methods via signature matching
             Map<String, String> methodSuggestions = methodMatcher.analyzeMethods(cn, simpleName);
 
-            // Also try string literal analysis for methods not already matched
+            // Also try string literal analysis
             Map<String, String> stringMethodSuggestions = StringLiteralAnalyzer.suggestMethodNames(cn);
             for (Map.Entry<String, String> sms : stringMethodSuggestions.entrySet()) {
-                methodSuggestions.putIfAbsent(sms.getKey(), sms.getValue());
+                if (!methodSuggestions.containsKey(sms.getKey())) {
+                    methodSuggestions.put(sms.getKey(), sms.getValue());
+                }
             }
 
             for (Map.Entry<String, String> ms : methodSuggestions.entrySet()) {
@@ -126,7 +114,6 @@ public class HeuristicRenamer implements TransformPhase {
             RenamingTransformer transformer = new RenamingTransformer(mappings);
             Map<String, ClassNode> renamedClasses = transformer.applyMappings(context.classes());
 
-            // Replace classes in context
             context.classes().clear();
             context.classes().putAll(renamedClasses);
             System.out.println("    Applied " + mappings.totalMappings() + " total mappings");

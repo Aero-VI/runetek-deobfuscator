@@ -3,16 +3,16 @@ package com.runetek.deobfuscator;
 import com.runetek.deobfuscator.engine.DeobfuscatorEngine;
 import com.runetek.deobfuscator.engine.EngineConfig;
 
-import java.nio.file.Path;
+import java.nio.file.Paths;
 
 /**
  * CLI entry point for the RuneTek Universal Deobfuscator.
  *
- * Usage: java -jar runetek-deobfuscator.jar <input-jar> <output-dir> [options]
+ * Usage: java -jar runetek-deobfuscator.jar &lt;input-jar&gt; &lt;output-dir&gt; [options]
  *
  * Options:
- *   --mappings <file>     Load/save mappings from/to JSON file
- *   --hooks <file>        Load hook definitions from JSON file
+ *   --mappings &lt;file&gt;     Load/save mappings from/to JSON file
+ *   --hooks &lt;file&gt;        Load hook definitions from JSON file
  *   --skip-rename         Skip Phase 1 (heuristic renaming)
  *   --skip-hooks          Skip Phase 2 (hook injection)
  *   --decompile           Decompile output to Java source (Phase 3)
@@ -26,36 +26,39 @@ public class Main {
             System.exit(1);
         }
 
-        Path inputJar = Path.of(args[0]);
-        Path outputDir = Path.of(args[1]);
-
         EngineConfig.Builder configBuilder = EngineConfig.builder()
-                .inputJar(inputJar)
-                .outputDir(outputDir);
+                .inputJar(Paths.get(args[0]))
+                .outputDir(Paths.get(args[1]));
 
         // Parse optional arguments
         for (int i = 2; i < args.length; i++) {
-            switch (args[i]) {
-                case "--mappings" -> configBuilder.mappingsFile(Path.of(args[++i]));
-                case "--hooks" -> configBuilder.hooksFile(Path.of(args[++i]));
-                case "--output-jar" -> configBuilder.outputJar(Path.of(args[++i]));
-                case "--skip-rename" -> configBuilder.skipRenaming(true);
-                case "--skip-hooks" -> configBuilder.skipHooks(true);
-                case "--decompile" -> configBuilder.decompile(true);
-                case "--verbose" -> configBuilder.verbose(true);
-                default -> {
-                    System.err.println("Unknown option: " + args[i]);
-                    printUsage();
-                    System.exit(1);
-                }
+            String arg = args[i];
+            if ("--mappings".equals(arg)) {
+                configBuilder.mappingsFile(Paths.get(args[++i]));
+            } else if ("--hooks".equals(arg)) {
+                configBuilder.hooksFile(Paths.get(args[++i]));
+            } else if ("--output-jar".equals(arg)) {
+                configBuilder.outputJar(Paths.get(args[++i]));
+            } else if ("--skip-rename".equals(arg)) {
+                configBuilder.skipRenaming(true);
+            } else if ("--skip-hooks".equals(arg)) {
+                configBuilder.skipHooks(true);
+            } else if ("--decompile".equals(arg)) {
+                configBuilder.decompile(true);
+            } else if ("--verbose".equals(arg)) {
+                configBuilder.verbose(true);
+            } else {
+                System.err.println("Unknown option: " + arg);
+                printUsage();
+                System.exit(1);
             }
         }
 
         EngineConfig config = configBuilder.build();
 
-        System.out.println("╔══════════════════════════════════════════════════╗");
-        System.out.println("║     RuneTek Universal Deobfuscator v0.1.0       ║");
-        System.out.println("╚══════════════════════════════════════════════════╝");
+        System.out.println("======================================================");
+        System.out.println("     RuneTek Universal Deobfuscator v0.1.0            ");
+        System.out.println("======================================================");
         System.out.println();
         System.out.println("Input:  " + config.inputJar());
         System.out.println("Output: " + config.outputDir());
@@ -64,9 +67,9 @@ public class Main {
         try {
             DeobfuscatorEngine engine = new DeobfuscatorEngine(config);
             engine.run();
-            System.out.println("\n✓ Deobfuscation complete.");
+            System.out.println("\n[OK] Deobfuscation complete.");
         } catch (Exception e) {
-            System.err.println("✗ Error: " + e.getMessage());
+            System.err.println("[ERROR] " + e.getMessage());
             if (config.verbose()) {
                 e.printStackTrace();
             }

@@ -14,15 +14,13 @@ public class MethodSignatureMatcher {
 
     /**
      * Analyze methods in a class and suggest renames.
-     * @return Map of "name+desc" → suggested name
+     * @return Map of "name+desc" to suggested name
      */
     public Map<String, String> analyzeMethods(ClassNode cn, String className) {
-        Map<String, String> suggestions = new LinkedHashMap<>();
+        Map<String, String> suggestions = new LinkedHashMap<String, String>();
 
         for (MethodNode mn : cn.methods) {
-            // Skip constructors and static initializers
             if (mn.name.equals("<init>") || mn.name.equals("<clinit>")) continue;
-            // Skip already-meaningful names
             if (!FieldPatternMatcher.isObfuscatedName(mn.name)) continue;
 
             String suggested = suggestMethodName(mn, cn, className);
@@ -35,46 +33,35 @@ public class MethodSignatureMatcher {
     }
 
     private String suggestMethodName(MethodNode mn, ClassNode cn, String className) {
-        // 1. Check for known signature patterns
         String bySignature = matchBySignature(mn);
         if (bySignature != null) return bySignature;
 
-        // 2. Check for string constants that hint at purpose
         String byStrings = matchByStringConstants(mn);
         if (byStrings != null) return byStrings;
 
-        // 3. Check for instruction patterns
         String byInstructions = matchByInstructionPattern(mn);
         if (byInstructions != null) return byInstructions;
 
-        // 4. Context-aware based on class type
         return matchByClassContext(mn, className);
     }
 
     private String matchBySignature(MethodNode mn) {
-        // Common getter/setter patterns
         if (mn.desc.startsWith("()") && !mn.desc.equals("()V")) {
-            // No args, returns something = likely getter
             if ((mn.access & Opcodes.ACC_STATIC) == 0 && instructionCount(mn) <= 5) {
                 return "get" + capitalizeReturnType(mn.desc);
             }
         }
 
-        // void(X) with single field store = likely setter
         if (mn.desc.matches("\\([A-Z]\\)V") || mn.desc.matches("\\(L[^;]+;\\)V")) {
             if ((mn.access & Opcodes.ACC_STATIC) == 0 && instructionCount(mn) <= 5) {
                 return "setValue";
             }
         }
 
-        // Buffer read patterns
-        if (mn.desc.equals("()I") && hasMethodCall(mn, "read")) return "readUnsignedByte";
-        if (mn.desc.equals("()Ljava/lang/String;") && hasMethodCall(mn, "read")) return "readString";
+        if ("()I".equals(mn.desc) && hasMethodCall(mn, "read")) return "readUnsignedByte";
+        if ("()Ljava/lang/String;".equals(mn.desc) && hasMethodCall(mn, "read")) return "readString";
+        if ("(I)V".equals(mn.desc) && hasMethodCall(mn, "write")) return "writeByte";
 
-        // Buffer write patterns
-        if (mn.desc.equals("(I)V") && hasMethodCall(mn, "write")) return "writeByte";
-
-        // Decode/encode patterns
         if (mn.desc.contains("Buffer") || mn.desc.contains("[B")) {
             if (mn.desc.endsWith("V")) return "decode";
         }
@@ -85,16 +72,19 @@ public class MethodSignatureMatcher {
     private String matchByStringConstants(MethodNode mn) {
         if (mn.instructions == null) return null;
 
-        for (AbstractInsnNode insn : mn.instructions) {
-            if (insn instanceof LdcInsnNode ldc && ldc.cst instanceof String str) {
-                str = str.toLowerCase();
-                if (str.contains("login")) return "processLogin";
-                if (str.contains("error")) return "handleError";
-                if (str.contains("disconnect")) return "onDisconnect";
-                if (str.contains("loading")) return "loadResources";
-                if (str.contains("render")) return "render";
-                if (str.contains("draw")) return "draw";
-                if (str.contains("update")) return "update";
+        for (AbstractInsnNode insn = mn.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+            if (insn instanceof LdcInsnNode) {
+                LdcInsnNode ldc = (LdcInsnNode) insn;
+                if (ldc.cst instanceof String) {
+                    String str = ((String) ldc.cst).toLowerCase();
+                    if (str.contains("login")) return "processLogin";
+                    if (str.contains("error")) return "handleError";
+                    if (str.contains("disconnect")) return "onDisconnect";
+                    if (str.contains("loading")) return "loadResources";
+                    if (str.contains("render")) return "render";
+                    if (str.contains("draw")) return "draw";
+                    if (str.contains("update")) return "update";
+                }
             }
         }
         return null;
@@ -108,11 +98,12 @@ public class MethodSignatureMatcher {
         boolean hasSocketOp = false;
         int mathOps = 0;
 
-        for (AbstractInsnNode insn : mn.instructions) {
+        for (AbstractInsnNode insn = mn.instructions.getFirst(); insn != null; insn = insn.getNext()) {
             if (insn.getOpcode() == Opcodes.IASTORE || insn.getOpcode() == Opcodes.AASTORE) {
                 hasArrayStore = true;
             }
-            if (insn instanceof MethodInsnNode methodInsn) {
+            if (insn instanceof MethodInsnNode) {
+                MethodInsnNode methodInsn = (MethodInsnNode) insn;
                 if (methodInsn.owner.contains("Graphics") || methodInsn.owner.contains("Image")) {
                     hasGraphicsCall = true;
                 }
@@ -135,28 +126,21 @@ public class MethodSignatureMatcher {
     private String matchByClassContext(MethodNode mn, String className) {
         if (className == null) return null;
 
-        return switch (className) {
-            case "Buffer" -> {
-                if (mn.desc.startsWith("()") && !mn.desc.equals("()V")) yield "read";
-                if (mn.desc.endsWith("V") && !mn.desc.equals("()V")) yield "write";
-                yield null;
-            }
-            case "Node" -> {
-                if (mn.desc.equals("()V") && instructionCount(mn) < 10) yield "unlink";
-                yield null;
-            }
-            case "Model" -> {
-                if (mn.desc.contains("III") && mn.desc.endsWith("V")) yield "rotate";
-                yield null;
-            }
-            default -> null;
-        };
+        if ("Buffer".equals(className)) {
+            if (mn.desc.startsWith("()") && !"()V".equals(mn.desc)) return "read";
+            if (mn.desc.endsWith("V") && !"()V".equals(mn.desc)) return "write";
+        } else if ("Node".equals(className)) {
+            if ("()V".equals(mn.desc) && instructionCount(mn) < 10) return "unlink";
+        } else if ("Model".equals(className)) {
+            if (mn.desc.contains("III") && mn.desc.endsWith("V")) return "rotate";
+        }
+        return null;
     }
 
     private int instructionCount(MethodNode mn) {
         if (mn.instructions == null) return 0;
         int count = 0;
-        for (AbstractInsnNode insn : mn.instructions) {
+        for (AbstractInsnNode insn = mn.instructions.getFirst(); insn != null; insn = insn.getNext()) {
             if (insn.getOpcode() >= 0) count++;
         }
         return count;
@@ -164,8 +148,9 @@ public class MethodSignatureMatcher {
 
     private boolean hasMethodCall(MethodNode mn, String nameFragment) {
         if (mn.instructions == null) return false;
-        for (AbstractInsnNode insn : mn.instructions) {
-            if (insn instanceof MethodInsnNode methodInsn) {
+        for (AbstractInsnNode insn = mn.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+            if (insn instanceof MethodInsnNode) {
+                MethodInsnNode methodInsn = (MethodInsnNode) insn;
                 if (methodInsn.name.toLowerCase().contains(nameFragment.toLowerCase())) {
                     return true;
                 }
@@ -176,16 +161,14 @@ public class MethodSignatureMatcher {
 
     private String capitalizeReturnType(String desc) {
         String ret = desc.substring(desc.indexOf(')') + 1);
-        return switch (ret) {
-            case "I" -> "Int";
-            case "J" -> "Long";
-            case "Z" -> "Boolean";
-            case "B" -> "Byte";
-            case "S" -> "Short";
-            case "F" -> "Float";
-            case "D" -> "Double";
-            case "Ljava/lang/String;" -> "String";
-            default -> "Value";
-        };
+        if ("I".equals(ret)) return "Int";
+        if ("J".equals(ret)) return "Long";
+        if ("Z".equals(ret)) return "Boolean";
+        if ("B".equals(ret)) return "Byte";
+        if ("S".equals(ret)) return "Short";
+        if ("F".equals(ret)) return "Float";
+        if ("D".equals(ret)) return "Double";
+        if ("Ljava/lang/String;".equals(ret)) return "String";
+        return "Value";
     }
 }

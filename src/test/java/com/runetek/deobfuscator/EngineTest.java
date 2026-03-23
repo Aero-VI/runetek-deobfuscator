@@ -11,10 +11,10 @@ import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.tree.*;
 
 import java.io.FileOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
 
@@ -22,16 +22,12 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Integration tests for the deobfuscator engine.
- * Creates synthetic obfuscated classes to test the pipeline.
  */
 class EngineTest {
 
     @TempDir
     Path tempDir;
 
-    /**
-     * Test: MappingStore round-trip (save/load JSON)
-     */
     @Test
     void testMappingStoreRoundTrip() {
         MappingStore store = new MappingStore();
@@ -52,9 +48,6 @@ class EngineTest {
         assertEquals("processLogin", loaded.resolveMethod("a", "d", "(II)V"));
     }
 
-    /**
-     * Test: ClassHeuristicAnalyzer identifies a Buffer-like class
-     */
     @Test
     void testHeuristicAnalyzerIdentifiesBuffer() {
         ClassNode cn = createBufferClass();
@@ -63,9 +56,6 @@ class EngineTest {
         assertEquals("Buffer", result);
     }
 
-    /**
-     * Test: ClassHeuristicAnalyzer identifies a Node-like class
-     */
     @Test
     void testHeuristicAnalyzerIdentifiesNode() {
         ClassNode cn = createNodeClass();
@@ -74,9 +64,6 @@ class EngineTest {
         assertEquals("Node", result);
     }
 
-    /**
-     * Test: FieldPatternMatcher detects obfuscated names
-     */
     @Test
     void testObfuscatedNameDetection() {
         assertTrue(FieldPatternMatcher.isObfuscatedName("a"));
@@ -86,9 +73,6 @@ class EngineTest {
         assertFalse(FieldPatternMatcher.isObfuscatedName("processLogin"));
     }
 
-    /**
-     * Test: RenamingTransformer applies class renames
-     */
     @Test
     void testRenamingTransformer() {
         MappingStore store = new MappingStore();
@@ -98,7 +82,8 @@ class EngineTest {
 
         ClassNode cn = createBufferClass();
 
-        Map<String, ClassNode> classes = Map.of("a", cn);
+        Map<String, ClassNode> classes = new LinkedHashMap<String, ClassNode>();
+        classes.put("a", cn);
         RenamingTransformer transformer = new RenamingTransformer(store);
         Map<String, ClassNode> result = transformer.applyMappings(classes);
 
@@ -107,9 +92,6 @@ class EngineTest {
         assertEquals("Buffer", renamed.name);
     }
 
-    /**
-     * Test: HookRegistry loads and queries hooks
-     */
     @Test
     void testHookRegistry() {
         HookRegistry registry = new HookRegistry();
@@ -128,12 +110,8 @@ class EngineTest {
         assertEquals(1, registry.hooksForMethod("Client", "tick", "()V").size());
     }
 
-    /**
-     * Test: MethodHookVisitor injects entry hook
-     */
     @Test
     void testMethodEntryHookInjection() {
-        // Create a simple method
         MethodNode mn = new MethodNode(Opcodes.ACC_PUBLIC, "tick", "()V", null, null);
         mn.instructions.add(new InsnNode(Opcodes.RETURN));
 
@@ -144,26 +122,20 @@ class EngineTest {
                 .targetDescriptor("()V")
                 .build();
 
-        int injected = MethodHookVisitor.injectEntryHooks(mn, List.of(hook));
+        int injected = MethodHookVisitor.injectEntryHooks(mn, Arrays.asList(hook));
         assertEquals(1, injected);
-
-        // Verify the instructions were added (should have more than just RETURN now)
         assertTrue(mn.instructions.size() > 1);
     }
 
-    /**
-     * Test: MethodHookVisitor injects exit hooks before all return instructions
-     */
     @Test
     void testMethodExitHookInjection() {
         MethodNode mn = new MethodNode(Opcodes.ACC_PUBLIC, "process", "()V", null, null);
-        // Two return paths
         LabelNode label = new LabelNode();
         mn.instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
         mn.instructions.add(new JumpInsnNode(Opcodes.IFNULL, label));
-        mn.instructions.add(new InsnNode(Opcodes.RETURN)); // early return
+        mn.instructions.add(new InsnNode(Opcodes.RETURN));
         mn.instructions.add(label);
-        mn.instructions.add(new InsnNode(Opcodes.RETURN)); // normal return
+        mn.instructions.add(new InsnNode(Opcodes.RETURN));
 
         HookDefinition hook = HookDefinition.builder("onProcessExit")
                 .type(HookDefinition.HookType.METHOD_EXIT)
@@ -172,16 +144,12 @@ class EngineTest {
                 .targetDescriptor("()V")
                 .build();
 
-        int injected = MethodHookVisitor.injectExitHooks(mn, List.of(hook));
-        assertEquals(2, injected); // One hook injected before each RETURN
+        int injected = MethodHookVisitor.injectExitHooks(mn, Arrays.asList(hook));
+        assertEquals(2, injected);
     }
 
-    /**
-     * Test: MethodHookVisitor injects field SET hooks
-     */
     @Test
     void testFieldSetHookInjection() {
-        // Create a method that sets a field
         MethodNode mn = new MethodNode(Opcodes.ACC_PUBLIC, "update", "()V", null, null);
         mn.instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
         mn.instructions.add(new InsnNode(Opcodes.ICONST_1));
@@ -195,17 +163,13 @@ class EngineTest {
                 .targetDescriptor("I")
                 .build();
 
-        int injected = MethodHookVisitor.injectFieldSetHooks(mn, "gameState", "I", List.of(hook));
+        int injected = MethodHookVisitor.injectFieldSetHooks(mn, "gameState", "I", Arrays.asList(hook));
         assertEquals(1, injected);
-        assertTrue(mn.instructions.size() > 4); // More instructions now
+        assertTrue(mn.instructions.size() > 4);
     }
 
-    /**
-     * Test: MethodHookVisitor injects field GET hooks
-     */
     @Test
     void testFieldGetHookInjection() {
-        // Create a method that reads a field
         MethodNode mn = new MethodNode(Opcodes.ACC_PUBLIC, "getState", "()I", null, null);
         mn.instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
         mn.instructions.add(new FieldInsnNode(Opcodes.GETFIELD, "Client", "gameState", "I"));
@@ -218,50 +182,37 @@ class EngineTest {
                 .targetDescriptor("I")
                 .build();
 
-        int injected = MethodHookVisitor.injectFieldGetHooks(mn, "gameState", "I", List.of(hook));
+        int injected = MethodHookVisitor.injectFieldGetHooks(mn, "gameState", "I", Arrays.asList(hook));
         assertEquals(1, injected);
         assertTrue(mn.instructions.size() > 3);
     }
 
-    /**
-     * Test: EventBus class generation produces valid bytecode with listener support
-     */
     @Test
     void testEventBusGeneration() {
         ClassNode eventBus = EventBus.generateEventBusClass();
         assertEquals("com/runetek/hooks/EventBus", eventBus.name);
-
-        // Should have fire, register, unregister, <init>, <clinit> methods
         assertTrue(eventBus.methods.size() >= 4);
 
-        // Verify fire method exists
-        boolean hasFire = eventBus.methods.stream()
-                .anyMatch(m -> m.name.equals("fire") && m.desc.equals(EventBus.FIRE_DESCRIPTOR));
+        boolean hasFire = false;
+        boolean hasRegister = false;
+        boolean hasUnregister = false;
+        for (MethodNode m : eventBus.methods) {
+            if ("fire".equals(m.name) && EventBus.FIRE_DESCRIPTOR.equals(m.desc)) hasFire = true;
+            if ("register".equals(m.name)) hasRegister = true;
+            if ("unregister".equals(m.name)) hasUnregister = true;
+        }
         assertTrue(hasFire, "EventBus should have fire method");
-
-        // Verify register method exists
-        boolean hasRegister = eventBus.methods.stream()
-                .anyMatch(m -> m.name.equals("register"));
         assertTrue(hasRegister, "EventBus should have register method");
-
-        // Verify unregister method exists
-        boolean hasUnregister = eventBus.methods.stream()
-                .anyMatch(m -> m.name.equals("unregister"));
         assertTrue(hasUnregister, "EventBus should have unregister method");
 
-        // Should compile to valid bytes
         byte[] bytes = AsmUtil.toBytesNoFrames(eventBus);
         assertNotNull(bytes);
         assertTrue(bytes.length > 0);
 
-        // Should be loadable back
         ClassNode loaded = JarLoader.loadClass(bytes);
         assertEquals("com/runetek/hooks/EventBus", loaded.name);
     }
 
-    /**
-     * Test: EventListener interface generation
-     */
     @Test
     void testEventListenerGeneration() {
         ClassNode listener = EventBus.generateListenerInterface();
@@ -269,23 +220,19 @@ class EngineTest {
         assertTrue((listener.access & Opcodes.ACC_INTERFACE) != 0);
         assertTrue((listener.access & Opcodes.ACC_ABSTRACT) != 0);
 
-        // Should have the onEvent method
-        boolean hasOnEvent = listener.methods.stream()
-                .anyMatch(m -> m.name.equals("onEvent"));
+        boolean hasOnEvent = false;
+        for (MethodNode m : listener.methods) {
+            if ("onEvent".equals(m.name)) hasOnEvent = true;
+        }
         assertTrue(hasOnEvent, "EventListener should have onEvent method");
 
-        // Should compile to valid bytes
         byte[] bytes = AsmUtil.toBytesNoFrames(listener);
         assertNotNull(bytes);
         assertTrue(bytes.length > 0);
     }
 
-    /**
-     * Test: Full pipeline with synthetic JAR
-     */
     @Test
     void testFullPipeline() throws Exception {
-        // Create a synthetic JAR with obfuscated classes
         Path inputJar = createSyntheticJar();
         Path outputDir = tempDir.resolve("output");
 
@@ -297,33 +244,25 @@ class EngineTest {
         DeobfuscatorEngine engine = new DeobfuscatorEngine(config);
         engine.run();
 
-        // Verify output was created
         assertTrue(outputDir.resolve("classes").toFile().exists());
     }
 
-    /**
-     * Test: Full pipeline with hook injection
-     */
     @Test
     void testFullPipelineWithHooks() throws Exception {
-        // Create synthetic JAR
         Path inputJar = createSyntheticJar();
         Path outputDir = tempDir.resolve("output-hooks");
 
-        // Write hook definitions
         Path hooksFile = tempDir.resolve("hooks.json");
-        String hooksJson = """
-                [
-                  {
-                    "name": "onBufferRead",
-                    "type": "METHOD_ENTRY",
-                    "targetClass": "Buffer",
-                    "targetMember": "read",
-                    "targetDescriptor": "()I"
-                  }
-                ]
-                """;
-        Files.writeString(hooksFile, hooksJson);
+        String hooksJson = "[\n"
+                + "  {\n"
+                + "    \"name\": \"onBufferRead\",\n"
+                + "    \"type\": \"METHOD_ENTRY\",\n"
+                + "    \"targetClass\": \"Buffer\",\n"
+                + "    \"targetMember\": \"read\",\n"
+                + "    \"targetDescriptor\": \"()I\"\n"
+                + "  }\n"
+                + "]";
+        Files.write(hooksFile, hooksJson.getBytes(StandardCharsets.UTF_8));
 
         EngineConfig config = EngineConfig.builder()
                 .inputJar(inputJar)
@@ -337,31 +276,26 @@ class EngineTest {
         assertTrue(outputDir.resolve("classes").toFile().exists());
     }
 
-    /**
-     * Test: Hook definitions JSON round-trip
-     */
     @Test
     void testHookDefinitionsFromJson() throws Exception {
         Path hooksFile = tempDir.resolve("hooks.json");
-        String json = """
-                [
-                  {
-                    "name": "onLogin",
-                    "type": "METHOD_ENTRY",
-                    "targetClass": "Client",
-                    "targetMember": "processLogin",
-                    "targetDescriptor": "(II)V"
-                  },
-                  {
-                    "name": "onGameStateChange",
-                    "type": "FIELD_SET",
-                    "targetClass": "Client",
-                    "targetMember": "gameState",
-                    "targetDescriptor": "I"
-                  }
-                ]
-                """;
-        Files.writeString(hooksFile, json);
+        String json = "[\n"
+                + "  {\n"
+                + "    \"name\": \"onLogin\",\n"
+                + "    \"type\": \"METHOD_ENTRY\",\n"
+                + "    \"targetClass\": \"Client\",\n"
+                + "    \"targetMember\": \"processLogin\",\n"
+                + "    \"targetDescriptor\": \"(II)V\"\n"
+                + "  },\n"
+                + "  {\n"
+                + "    \"name\": \"onGameStateChange\",\n"
+                + "    \"type\": \"FIELD_SET\",\n"
+                + "    \"targetClass\": \"Client\",\n"
+                + "    \"targetMember\": \"gameState\",\n"
+                + "    \"targetDescriptor\": \"I\"\n"
+                + "  }\n"
+                + "]";
+        Files.write(hooksFile, json.getBytes(StandardCharsets.UTF_8));
 
         HookRegistry registry = new HookRegistry();
         registry.loadFromFile(hooksFile);
@@ -371,21 +305,18 @@ class EngineTest {
         assertEquals(1, registry.hooksForField("Client", "gameState").size());
     }
 
-    // ---- Helper methods to create synthetic obfuscated classes ----
+    // ---- Helper methods ----
 
     private ClassNode createBufferClass() {
         ClassNode cn = new ClassNode();
-        cn.version = Opcodes.V21;
+        cn.version = Opcodes.V1_8;
         cn.access = Opcodes.ACC_PUBLIC;
         cn.name = "a";
         cn.superName = "java/lang/Object";
 
-        // byte[] field (data)
         cn.fields.add(new FieldNode(Opcodes.ACC_PUBLIC, "b", "[B", null, null));
-        // int field (position)
         cn.fields.add(new FieldNode(Opcodes.ACC_PUBLIC, "c", "I", null, null));
 
-        // Multiple read/write methods
         for (int i = 0; i < 6; i++) {
             MethodNode mn = new MethodNode(Opcodes.ACC_PUBLIC, "m" + i, "()I", null, null);
             mn.instructions.add(new InsnNode(Opcodes.ICONST_0));
@@ -398,15 +329,13 @@ class EngineTest {
 
     private ClassNode createNodeClass() {
         ClassNode cn = new ClassNode();
-        cn.version = Opcodes.V21;
+        cn.version = Opcodes.V1_8;
         cn.access = Opcodes.ACC_PUBLIC;
         cn.name = "b";
         cn.superName = "java/lang/Object";
 
-        // Self-referencing fields (next, previous)
         cn.fields.add(new FieldNode(Opcodes.ACC_PUBLIC, "a", "Lb;", null, null));
         cn.fields.add(new FieldNode(Opcodes.ACC_PUBLIC, "b", "Lb;", null, null));
-        // Key field
         cn.fields.add(new FieldNode(Opcodes.ACC_PUBLIC, "c", "J", null, null));
 
         return cn;
@@ -415,24 +344,22 @@ class EngineTest {
     private Path createSyntheticJar() throws Exception {
         Path jarPath = tempDir.resolve("obfuscated.jar");
 
-        try (JarOutputStream jos = new JarOutputStream(new FileOutputStream(jarPath.toFile()))) {
-            // Add Buffer class
+        JarOutputStream jos = new JarOutputStream(new FileOutputStream(jarPath.toFile()));
+        try {
             ClassNode bufferClass = createBufferClass();
             byte[] bytes = AsmUtil.toBytesNoFrames(bufferClass);
             jos.putNextEntry(new JarEntry("a.class"));
             jos.write(bytes);
             jos.closeEntry();
 
-            // Add Node class
             ClassNode nodeClass = createNodeClass();
             bytes = AsmUtil.toBytesNoFrames(nodeClass);
             jos.putNextEntry(new JarEntry("b.class"));
             jos.write(bytes);
             jos.closeEntry();
 
-            // Add a generic class
             ClassNode genericClass = new ClassNode();
-            genericClass.version = Opcodes.V21;
+            genericClass.version = Opcodes.V1_8;
             genericClass.access = Opcodes.ACC_PUBLIC;
             genericClass.name = "c";
             genericClass.superName = "java/lang/Object";
@@ -447,6 +374,8 @@ class EngineTest {
             jos.putNextEntry(new JarEntry("c.class"));
             jos.write(bytes);
             jos.closeEntry();
+        } finally {
+            jos.close();
         }
 
         return jarPath;

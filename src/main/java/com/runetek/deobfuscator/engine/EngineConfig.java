@@ -6,17 +6,42 @@ import java.nio.file.Path;
  * Immutable configuration for the deobfuscator engine.
  * Built via the fluent Builder pattern.
  */
-public record EngineConfig(
-        Path inputJar,
-        Path outputDir,
-        Path mappingsFile,
-        Path hooksFile,
-        Path outputJar,
-        boolean skipRenaming,
-        boolean skipHooks,
-        boolean decompile,
-        boolean verbose
-) {
+public final class EngineConfig {
+
+    private final Path inputJar;
+    private final Path outputDir;
+    private final Path mappingsFile;
+    private final Path hooksFile;
+    private final Path outputJar;
+    private final boolean skipRenaming;
+    private final boolean skipHooks;
+    private final boolean decompile;
+    private final boolean verbose;
+
+    private EngineConfig(Path inputJar, Path outputDir, Path mappingsFile, Path hooksFile,
+                         Path outputJar, boolean skipRenaming, boolean skipHooks,
+                         boolean decompile, boolean verbose) {
+        this.inputJar = inputJar;
+        this.outputDir = outputDir;
+        this.mappingsFile = mappingsFile;
+        this.hooksFile = hooksFile;
+        this.outputJar = outputJar;
+        this.skipRenaming = skipRenaming;
+        this.skipHooks = skipHooks;
+        this.decompile = decompile;
+        this.verbose = verbose;
+    }
+
+    public Path inputJar() { return inputJar; }
+    public Path outputDir() { return outputDir; }
+    public Path mappingsFile() { return mappingsFile; }
+    public Path hooksFile() { return hooksFile; }
+    public Path outputJar() { return outputJar; }
+    public boolean skipRenaming() { return skipRenaming; }
+    public boolean skipHooks() { return skipHooks; }
+    public boolean decompile() { return decompile; }
+    public boolean verbose() { return verbose; }
+
     public static Builder builder() {
         return new Builder();
     }
