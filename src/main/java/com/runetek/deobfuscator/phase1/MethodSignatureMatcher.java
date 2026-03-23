@@ -16,16 +16,44 @@ public class MethodSignatureMatcher {
      * Analyze methods in a class and suggest renames.
      * @return Map of "name+desc" to suggested name
      */
+    // Methods from JDK classes that must never be renamed (could be overrides)
+    private static final java.util.Set<String> JDK_OVERRIDE_METHODS = new java.util.HashSet<String>(
+            java.util.Arrays.asList(
+                // Runnable
+                "run+()V",
+                // Applet
+                "init+()V", "start+()V", "stop+()V", "destroy+()V",
+                // Component/Container
+                "paint+(Ljava/awt/Graphics;)V", "update+(Ljava/awt/Graphics;)V",
+                "repaint+()V",
+                // Object
+                "equals+(Ljava/lang/Object;)Z", "hashCode+()I", "toString+()Ljava/lang/String;",
+                "clone+()Ljava/lang/Object;", "finalize+()V"
+            ));
+
     public Map<String, String> analyzeMethods(ClassNode cn, String className) {
         Map<String, String> suggestions = new LinkedHashMap<String, String>();
+
+        // Check if class extends JDK/external class (any super not in obfuscated set)
+        boolean extendsExternal = cn.superName != null && (
+                cn.superName.startsWith("java/") || cn.superName.startsWith("javax/") ||
+                cn.superName.startsWith("sun/") || cn.superName.startsWith("com/sun/"));
 
         for (MethodNode mn : cn.methods) {
             if (mn.name.equals("<init>") || mn.name.equals("<clinit>")) continue;
             if (!FieldPatternMatcher.isObfuscatedName(mn.name)) continue;
 
+            // Don't rename methods that could override JDK methods
+            String methodKey = mn.name + "+" + mn.desc;
+            if (JDK_OVERRIDE_METHODS.contains(methodKey)) continue;
+
+            // If the class extends an external class, be conservative — skip all methods
+            // whose name+desc could be an override (we can't inspect JDK bytecode)
+            if (extendsExternal && (mn.access & Opcodes.ACC_STATIC) == 0) continue;
+
             String suggested = suggestMethodName(mn, cn, className);
             if (suggested != null) {
-                suggestions.put(mn.name + "+" + mn.desc, suggested);
+                suggestions.put(methodKey, suggested);
             }
         }
 

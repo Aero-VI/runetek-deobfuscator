@@ -54,9 +54,9 @@ public class ProjectGenerator {
         // Find the main Applet class (extends java/applet/Applet hierarchy)
         String appletClassName = findAppletClass(context);
 
-        // Write the deobfuscated JAR into lib/
+        // Write the deobfuscated JAR into lib/ (with Launcher for direct execution)
         Path libJar = libDir.resolve("deobfuscated-client.jar");
-        JarWriter.writeJar(context, libJar, null);
+        JarWriter.writeRunnableJar(context, libJar, appletClassName);
 
         // Generate Launcher.java
         writeLauncher(sourcesDir, appletClassName);
@@ -283,12 +283,25 @@ public class ProjectGenerator {
                 + "    <option name=\"MAIN_CLASS_NAME\" value=\"Launcher\" />\n"
                 + "    <module name=\"deobfuscated-client\" />\n"
                 + "    <option name=\"VM_PARAMETERS\" value=\"-Xmx512m\" />\n"
+                + "    <option name=\"WORKING_DIRECTORY\" value=\"$PROJECT_DIR$\" />\n"
                 + "    <method v=\"2\">\n"
                 + "      <option name=\"Make\" enabled=\"true\" />\n"
                 + "    </method>\n"
                 + "  </configuration>\n"
                 + "</component>\n";
         Files.write(runConfigDir.resolve("Launch_Client.xml"), config.getBytes(StandardCharsets.UTF_8));
+
+        // Also write a JAR-based run config that doesn't need compilation
+        String jarConfig = "<component name=\"ProjectRunConfigurationManager\">\n"
+                + "  <configuration default=\"false\" name=\"Launch Client (JAR)\" type=\"JarApplication\" factoryName=\"JAR Application\">\n"
+                + "    <option name=\"JAR_PATH\" value=\"$PROJECT_DIR$/lib/deobfuscated-client.jar\" />\n"
+                + "    <option name=\"MAIN_CLASS_NAME\" value=\"Launcher\" />\n"
+                + "    <option name=\"VM_PARAMETERS\" value=\"-Xmx512m\" />\n"
+                + "    <option name=\"WORKING_DIRECTORY\" value=\"$PROJECT_DIR$\" />\n"
+                + "    <method v=\"2\" />\n"
+                + "  </configuration>\n"
+                + "</component>\n";
+        Files.write(runConfigDir.resolve("Launch_Client_JAR.xml"), jarConfig.getBytes(StandardCharsets.UTF_8));
     }
 
     private static void writeIdeaFiles(Path projectDir) throws IOException {
