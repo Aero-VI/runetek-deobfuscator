@@ -34,16 +34,15 @@ public class JS5Bypass {
     public static int apply(TransformContext context) {
         int patches = 0;
 
-        // Strategy 1: Find and set Definition1.intField0 (gameState) to 25 at init
-        // This skips states 0, 5, 10 which all do JS5 work
-        patches += patchGameStateInit(context);
-
-        // Strategy 2: Empty out JS5 handler methods as a safety net
+        // Find the JS5 handler method (contains "js5io" string) and the game state field.
+        // Instead of emptying the method or skipping states, make the JS5 handler
+        // set gameState = 25 (login screen) so loading resources still happens
+        // but JS5 is skipped.
         for (Map.Entry<String, ClassNode> entry : context.classes().entrySet()) {
             ClassNode cn = entry.getValue();
             for (MethodNode mn : cn.methods) {
                 if (mn.instructions == null) continue;
-                patches += patchJS5Method(mn, cn.name);
+                patches += patchJS5Handler(mn, cn.name);
             }
         }
 
@@ -130,8 +129,68 @@ public class JS5Bypass {
     }
 
     /**
-     * Find the method that handles JS5 connection (contains "js5io"/"js5connect" strings)
-     * and inject a RETURN at the top to skip it entirely.
+     * Find the method that handles the JS5 update flow (contains "js5io" string
+     * and sets game state to 1000 on error). Replace the method body with:
+     *   gameState = 25;  // skip to login screen
+     *   return;
+     * This lets all resource loading happen normally but skips the JS5 connection.
+     */
+    private static int patchJS5Handler(MethodNode mn, String className) {
+        // Check for "js5io" string
+        boolean hasJS5 = false;
+        for (AbstractInsnNode insn = mn.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+            if (insn instanceof LdcInsnNode && "js5io".equals(((LdcInsnNode) insn).cst)) {
+                hasJS5 = true;
+                break;
+            }
+        }
+        if (!hasJS5) return 0;
+
+        // Find the game state field: look for PUTSTATIC setting 1000 (error state)
+        String gsOwner = null;
+        String gsName = null;
+        for (AbstractInsnNode insn = mn.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+            if (insn.getOpcode() != Opcodes.PUTSTATIC) continue;
+            FieldInsnNode fi = (FieldInsnNode) insn;
+            if (!"I".equals(fi.desc)) continue;
+            AbstractInsnNode prev = prevReal(insn);
+            if (prev != null && getIntValue(prev) == 1000) {
+                gsOwner = fi.owner;
+                gsName = fi.name;
+                break;
+            }
+        }
+
+        if (gsOwner == null) return 0;
+
+        // Replace method body: gameState = 25; return;
+        mn.instructions.clear();
+        mn.tryCatchBlocks.clear();
+        mn.localVariables = null;
+        mn.instructions.add(new IntInsnNode(Opcodes.BIPUSH, 25));
+        mn.instructions.add(new FieldInsnNode(Opcodes.PUTSTATIC, gsOwner, gsName, "I"));
+        mn.instructions.add(new InsnNode(Opcodes.RETURN));
+        mn.maxStack = 1;
+        // Count params for maxLocals
+        int params = (mn.access & Opcodes.ACC_STATIC) != 0 ? 0 : 1;
+        String desc = mn.desc;
+        int i = 1;
+        while (desc.charAt(i) != ')') {
+            char c = desc.charAt(i);
+            if (c == 'J' || c == 'D') { params += 2; i++; }
+            else if (c == 'L') { params++; i = desc.indexOf(';', i) + 1; }
+            else if (c == '[') { i++; continue; }
+            else { params++; i++; }
+        }
+        mn.maxLocals = params;
+
+        System.out.println("    [JS5 Bypass] Replaced " + className + "." + mn.name + mn.desc
+                + " → sets " + gsOwner + "." + gsName + " = 25 and returns");
+        return 1;
+    }
+
+    /**
+     * Legacy: find and disable JS5 methods.
      */
     private static int patchJS5Method(MethodNode mn, String className) {
         // Check if this method contains JS5-related strings
