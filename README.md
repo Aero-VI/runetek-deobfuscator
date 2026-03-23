@@ -1,36 +1,85 @@
 # RuneTek Universal Deobfuscator & Modification Framework
 
-An automated Java bytecode deobfuscator, injector, and decompiler framework targeting the RuneScape RuneTek 4 engine (Revisions 503–554), with scalable architecture to support RuneTek 3 (Revisions 317+).
+An automated Java bytecode deobfuscator, decompiler, and source fixer targeting the RuneScape RuneTek 4 engine (Revisions 503–554), producing **fully recompilable** Java source code.
 
-## Goal
-Input any raw, obfuscated `.jar` client from the OpenRS2 archive and output a cleanly mapped, modified, and highly readable Java source code project that can be recompiled and run out of the box.
+## What It Does
 
-## Phases
+Input any raw, ZKM-obfuscated `.jar` or `.dat` client from the OpenRS2 archive → output a clean Java source project that compiles and runs.
 
-### Phase 1: Heuristic Mapping & Deobfuscation
-- ASM-based bytecode analyzer that maps the obfuscated client before decompilation.
-- Reference data: widely documented 508 revision as baseline dictionary.
-- Heuristic signatures to identify core engine components (Player, PacketParser, Stream/Buffer, Network/Socket) regardless of ZKM renaming.
-- Renaming engine to dynamically rename obfuscated classes, methods, and fields into readable English.
+### Pipeline
 
-### Phase 2: Automated Bytecode Injection
-- IP Interception: locate socket connection method and inject hook to redirect to `127.0.0.1` (or user-defined IP).
-- RSA Lobotomy: locate login block encryption method and strip `BigInteger.modPow()` call, sending login blocks in plain text.
-
-### Phase 3: Decompilation Pipeline
-- Pipe modified `.jar` through headless industry-standard decompiler (Fernflower or CFR).
-- Output as a standard Java project (Maven/Ant) with all necessary dependencies (32‑bit JOGL for HD clients).
-
-### Phase 4: Expansion to RuneTek 3
-- Modular design allowing adaptation of heuristic signatures using 317 revision baseline.
-
-## Architecture
-- Core engine written in C# for performance and cross‑platform heuristics.
-- Java ASM for bytecode manipulation and renaming.
-- Maven‑based build for the final deobfuscated Java project.
+1. **ASM Bytecode Analysis** – Load all classes via ASM tree API
+2. **Class Renaming** – Rename obfuscated single-letter classes (`a` → `Class_a`) to avoid Java keyword conflicts
+3. **Opaque Predicate Removal** – Detect and fold ZKM dummy-parameter conditional branches
+4. **Collision Fixing** – Resolve method/field name collisions from renaming
+5. **Dead Code Cleaning** – Remove NOP padding and unreachable code
+6. **Vineflower Decompilation** – High-quality decompilation via Vineflower (modern Fernflower fork)
+7. **Post-Processing Source Fixes**:
+   - Disambiguate null arguments in overloaded method calls
+   - Cast Object-typed variables to correct AWT types (Container/Component)
+   - Replace JSObject.getWindow() with reflection (removed in modern Java)
+   - Fix Vineflower's synthetic class-literal field patterns
+   - Fix `initCause()` throw chains
+   - Add return stubs for methods Vineflower couldn't decompile
+   - Generate nativeadvert.browsercontrol stub library
 
 ## Usage
-*(To be populated after initial release)*
+
+```bash
+# Build
+mvn clean package
+
+# Run (produces output/508/src/ with compilable Java)
+java -jar target/runetek-deobfuscator-1.0-SNAPSHOT.jar input/508sd.dat
+
+# Compile the output
+cd output/508/src
+javac --release 21 -d ../bin $(find . -name "*.java")
+
+# Run (needs a display for the AWT/Applet client)
+cd ../bin
+java -cp . client 1 live live software members english game0
+```
+
+## Input Sources
+
+- OpenRS2 Archive: https://archive.openrs2.org/
+- The 508 SD client: `https://archive.openrs2.org/clients/30983.dat`
+
+## Results (508 SD Client)
+
+- **267** classes loaded and deobfuscated
+- **267** `.java` files generated
+- **0** compilation errors
+- **12** deprecation warnings (expected: Applet API removed in modern Java)
+- Client runs and prints usage; GUI requires a display
+
+## Requirements
+
+- Java 21+
+- Maven 3.8+
+
+## Architecture
+
+```
+src/main/java/com/aeroverra/deobfuscator/
+├── Deobfuscator.java           # Main entry point & pipeline orchestration
+├── transform/
+│   ├── TransformPipeline.java   # Orchestrates ASM transforms
+│   ├── ClassRenamer.java        # Renames obfuscated short class names
+│   ├── OpaquePredicateRemover.java  # Removes ZKM opaque predicates
+│   ├── CollisionFixer.java      # Fixes name collisions
+│   ├── DeadCodeCleaner.java     # Removes dead code / NOP padding
+│   └── ReturnTypeOverloadFixer.java # (experimental, disabled)
+├── decompile/
+│   └── VineflowerDecompiler.java    # Vineflower decompilation wrapper
+├── postprocess/
+│   └── SourceFixer.java         # Fixes decompiled source for compilation
+└── util/
+    ├── JarIO.java               # JAR loading/writing utilities
+    └── ScriptGenerator.java     # Batch script generator
+```
 
 ## License
+
 Proprietary – see `LICENSE`.

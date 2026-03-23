@@ -1,100 +1,107 @@
 package com.aeroverra.deobfuscator;
 
-import org.objectweb.asm.ClassReader;
-import org.objectweb.asm.ClassVisitor;
-import org.objectweb.asm.MethodVisitor;
-import org.objectweb.asm.Opcodes;
+import com.aeroverra.deobfuscator.transform.TransformPipeline;
+import com.aeroverra.deobfuscator.decompile.VineflowerDecompiler;
+import com.aeroverra.deobfuscator.postprocess.SourceFixer;
+import com.aeroverra.deobfuscator.util.JarIO;
+import com.aeroverra.deobfuscator.util.ScriptGenerator;
+import org.objectweb.asm.tree.ClassNode;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.util.Enumeration;
-import java.util.jar.JarEntry;
-import java.util.jar.JarFile;
+import java.nio.file.*;
+import java.util.Map;
 
 public class Deobfuscator {
-    public static void main(String[] args) {
-        if (args.length < 1) {
-            System.err.println("Usage: java -jar deobfuscator.jar <input.jar>");
-            return;
+
+    public static void main(String[] args) throws Exception {
+        Path inputFile;
+        Path outputDir;
+
+        if (args.length >= 2) {
+            inputFile = Paths.get(args[0]);
+            outputDir = Paths.get(args[1]);
+        } else if (args.length == 1) {
+            inputFile = Paths.get(args[0]);
+            outputDir = Paths.get("output/508");
+        } else {
+            inputFile = Paths.get("input/508sd.dat");
+            outputDir = Paths.get("output/508");
         }
 
-        String inputJar = args[0];
-        System.out.println("[*] Starting RuneTek Deobfuscator Framework (Java 8/ASM)");
-        System.out.println("[*] Analyzing target: " + inputJar);
+        if (!Files.exists(inputFile)) {
+            System.err.println("Input file not found: " + inputFile);
+            System.err.println("Usage: java -jar runetek-deobfuscator.jar <input.jar> [output-dir]");
+            System.exit(1);
+        }
 
-        try (JarFile jarFile = new JarFile(inputJar)) {
-            Enumeration<JarEntry> entries = jarFile.entries();
-            
-            while (entries.hasMoreElements()) {
-                JarEntry entry = entries.nextElement();
-                if (entry.getName().endsWith(".class")) {
-                    analyzeClass(jarFile, entry);
-                }
+        System.out.println("==========================================================");
+        System.out.println("  RuneTek Universal Deobfuscator v2.0");
+        System.out.println("==========================================================");
+        System.out.println();
+        System.out.println("Input:  " + inputFile);
+        System.out.println("Output: " + outputDir);
+        System.out.println();
+
+        // Phase 1: Load classes from JAR
+        System.out.println("[Phase 1] Loading classes from JAR...");
+        Map<String, ClassNode> classes = JarIO.loadJar(inputFile);
+        System.out.println("  Loaded " + classes.size() + " classes");
+
+        // Phase 2: ASM Deobfuscation
+        System.out.println("\n[Phase 2] ASM Deobfuscation Pipeline...");
+        TransformPipeline pipeline = new TransformPipeline();
+        pipeline.run(classes);
+
+        // Phase 3: Write cleaned bytecode to temp JAR for Vineflower
+        System.out.println("\n[Phase 3] Decompiling with Vineflower...");
+        Path tempJar = Files.createTempFile("deobfuscated-", ".jar");
+        JarIO.writeJar(classes, tempJar);
+
+        Path srcDir = outputDir.resolve("src");
+        Files.createDirectories(srcDir);
+        VineflowerDecompiler.decompile(tempJar, srcDir);
+        Files.deleteIfExists(tempJar);
+
+        // Phase 4: Post-process decompiled source to fix compilation issues
+        System.out.println("\n[Phase 4] Post-processing decompiled source...");
+        SourceFixer fixer = new SourceFixer(classes);
+        int fixes = fixer.fixAll(srcDir);
+        System.out.println("  Applied " + fixes + " source fixes");
+
+        // Phase 5: Generate batch scripts
+        System.out.println("\n[Phase 5] Generating batch scripts...");
+        String mainClass = findMainClass(classes);
+        ScriptGenerator.generate(outputDir, mainClass);
+
+        // Count output
+        long javaFiles = Files.walk(srcDir)
+                .filter(p -> p.toString().endsWith(".java"))
+                .count();
+        System.out.println("\n==========================================================");
+        System.out.println("  DONE! Generated " + javaFiles + " .java files");
+        System.out.println("  Output: " + outputDir.toAbsolutePath());
+        System.out.println("==========================================================");
+    }
+
+    private static String findMainClass(Map<String, ClassNode> classes) {
+        String best = null;
+        int bestDepth = -1;
+        for (ClassNode cn : classes.values()) {
+            int depth = 0;
+            String superName = cn.superName;
+            boolean isApplet = false;
+            while (superName != null && depth < 20) {
+                if (superName.contains("Applet")) { isApplet = true; break; }
+                ClassNode sup = classes.get(superName);
+                if (sup == null) break;
+                superName = sup.superName;
+                depth++;
             }
-            
-            System.out.println("[*] Phase 1: Initial Heuristic Mapping scan complete.");
-        } catch (IOException e) {
-            System.err.println("[!] I/O Error reading JAR: " + e.getMessage());
-            e.printStackTrace();
+            if (isApplet && depth > bestDepth) {
+                bestDepth = depth;
+                best = cn.name;
+            }
         }
-    }
-
-    private static void analyzeClass(JarFile jarFile, JarEntry entry) throws IOException {
-        try (InputStream is = jarFile.getInputStream(entry)) {
-            ClassReader classReader = new ClassReader(is);
-            ClassVisitor heuristicVisitor = new HeuristicClassVisitor(Opcodes.ASM9);
-            // We use 0 for flags to just read basic info without full frame calculation yet
-            classReader.accept(heuristicVisitor, 0);
-        }
-    }
-}
-
-class HeuristicClassVisitor extends ClassVisitor {
-    private String className;
-
-    public HeuristicClassVisitor(int api) {
-        super(api);
-    }
-
-    @Override
-    public void visit(int version, int access, String name, String signature, String superName, String[] interfaces) {
-        this.className = name;
-        // Future Phase 1: identify Applet subclasses, network streams
-        super.visit(version, access, name, signature, superName, interfaces);
-    }
-
-    @Override
-    public MethodVisitor visitMethod(int access, String name, String descriptor, String signature, String[] exceptions) {
-        MethodVisitor mv = super.visitMethod(access, name, descriptor, signature, exceptions);
-        // Map methods looking for PacketParser, Stream logic, RSA
-        return new HeuristicMethodVisitor(api, mv, className, name, descriptor);
-    }
-}
-
-class HeuristicMethodVisitor extends MethodVisitor {
-    private final String className;
-    private final String methodName;
-    private final String descriptor;
-
-    public HeuristicMethodVisitor(int api, MethodVisitor mv, String className, String methodName, String descriptor) {
-        super(api, mv);
-        this.className = className;
-        this.methodName = methodName;
-        this.descriptor = descriptor;
-    }
-
-    @Override
-    public void visitMethodInsn(int opcode, String owner, String name, String descriptor, boolean isInterface) {
-        // Phase 2 target: RSA Lobotomy signature check
-        if (owner.equals("java/math/BigInteger") && name.equals("modPow")) {
-            System.out.println("[+] Found potential RSA encryption block (modPow) in: " + className + "." + methodName);
-        }
-        
-        // Phase 2 target: IP connection logic signature check
-        if (owner.equals("java/net/Socket") && name.equals("<init>")) {
-            System.out.println("[+] Found socket initialization in: " + className + "." + methodName);
-        }
-        
-        super.visitMethodInsn(opcode, owner, name, descriptor, isInterface);
+        return best != null ? best.replace('/', '.') : "client";
     }
 }

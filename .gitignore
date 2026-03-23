@@ -2,10 +2,9 @@
 target/
 build/
 out/
-bin/
-*.jar
 *.war
 *.ear
+dependency-reduced-pom.xml
 
 # IDE
 .idea/
@@ -32,9 +31,6 @@ dependency-jars/
 tmp/
 temp/
 
-# Test outputs
-test-output/
-
 # Compiled class files
 *.class
 
@@ -42,10 +38,12 @@ test-output/
 *.pak
 *.bak
 
-# Fernflower/CFR outputs
-decompiled/
+# Decompiled output (generated, don't commit)
 output/
 
-# Client samples (do not commit obfuscated jars)
-samples/
-*.client.jar
+# Input files (large binary JARs)
+input/
+
+# Python scripts (dev tools)
+*.pyc
+__pycache__/
